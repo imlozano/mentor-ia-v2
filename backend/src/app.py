@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
@@ -9,12 +10,15 @@ from loguru import logger
 from starlette.responses import Response
 
 from src.agentes.agente_extraccion import AgenteExtraccion
+from src.agentes.agente_plan_repaso import AgentePlanRepaso
 from src.agentes.agente_respuesta import AgenteRespuesta
 from src.logger import setup_logging
 from src.models import (
     DocumentosResponse,
     DocumentoIndexado,
     HealthResponse,
+    PlanRepasoRequest,
+    PlanRepasoResponse,
     QueryRequest,
     QueryResponse,
     UploadResponse,
@@ -50,6 +54,12 @@ async def lifespan(app: FastAPI):
     app.state.agente_respuesta = AgenteRespuesta(
         qdrant_client=app.state.qdrant,
         gemini_service=app.state.gemini,
+    )
+    app.state.agente_plan_repaso = AgentePlanRepaso(
+        qdrant_client=app.state.qdrant,
+        gemini_service=app.state.gemini,
+        agente_extraccion=app.state.agente_extraccion,
+        make_webhook=app.state.make,
     )
 
     logger.bind(version=VERSION, cors_origins=settings.cors_origins).info(
@@ -237,4 +247,67 @@ async def query_endpoint(request: Request, body: QueryRequest) -> QueryResponse:
         raise HTTPException(
             status_code=503,
             detail="No fue posible procesar la consulta por fallo en servicios externos.",
+        ) from exc
+
+
+@app.post("/plan-repaso", response_model=PlanRepasoResponse)
+async def plan_repaso_endpoint(
+    request: Request,
+    file: UploadFile | None = File(default=None),
+) -> PlanRepasoResponse:
+    from src.utils.safe_filename import safe_filename
+
+    agente_plan: AgentePlanRepaso = request.app.state.agente_plan_repaso
+    content_type = request.headers.get("content-type", "")
+
+    tema: str
+    fecha_inicio: date
+    email: str | None = None
+    archivo_guardado: Path | None = None
+
+    if content_type.startswith("application/json"):
+        body = PlanRepasoRequest.model_validate(await request.json())
+        tema = body.tema
+        fecha_inicio = body.fecha_inicio
+        email = str(body.email) if body.email else None
+    else:
+        form = await request.form()
+        tema_raw = str(form.get("tema") or "").strip()
+        fecha_raw = str(form.get("fecha_inicio") or "").strip()
+        email_raw = str(form.get("email") or "").strip()
+        if not tema_raw or not fecha_raw:
+            raise HTTPException(
+                status_code=400,
+                detail="En modo multipart se requiere 'tema' y 'fecha_inicio'.",
+            )
+        try:
+            fecha_inicio = date.fromisoformat(fecha_raw)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="fecha_inicio debe estar en formato YYYY-MM-DD.",
+            ) from exc
+        tema = tema_raw
+        email = email_raw or None
+        if file is not None:
+            safe_name = safe_filename(file.filename or "documento_plan.pdf")
+            docs_dir = settings.base_docs_dir
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            archivo_guardado = docs_dir / safe_name
+            archivo_guardado.write_bytes(await file.read())
+
+    try:
+        return await agente_plan.generar_plan(
+            tema=tema,
+            fecha_inicio=fecha_inicio,
+            email=email,
+            archivo=archivo_guardado,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("plan-repaso failed: {!r}", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No fue posible generar el plan por fallo en servicios externos.",
         ) from exc
