@@ -58,3 +58,6 @@ yarn-error.log*
 .cache/
 tmp/
 *.tmp
+
+# ---- Handoff local (backup personal del usuario, no committeado) ----
+docs/specs/handoff-state.md
