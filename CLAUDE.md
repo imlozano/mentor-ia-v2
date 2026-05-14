@@ -35,6 +35,8 @@ usuario las contradice, el agente debe preguntar antes de proceder.
 | Capa            | Tecnología obligatoria                                  |
 | --------------- | ------------------------------------------------------- |
 | Frontend        | Next.js 16 (App Router) + React 19 + TypeScript 5       |
+| Gestor de paquetes frontend | pnpm 11+ con `minimumReleaseAge: 1440` (cooldown 24 h) y `blockExoticSubdeps: true` (defensa de cadena de suministro: Shai-Hulud 2.0 / Axios compromise) |
+| Node.js         | 22+                                                     |
 | Estilos         | Tailwind CSS 4 + shadcn/ui sobre Radix Primitives       |
 | Backend         | FastAPI + Python 3.11+                                  |
 | Base vectorial  | Qdrant Cloud, colección `mentor_ia_aprendizaje`, 768 dim, COSINE |
@@ -202,6 +204,72 @@ eso:
   ante la profesora.
 - El agente NO debe introducir librerías o patrones "porque están de
   moda" sin justificación técnica.
+
+## 9. Seguimiento del proyecto y ClickUp
+
+El avance real del proyecto se registra en ClickUp como herramienta
+única de seguimiento, alineado al WBS de la sección 6 del documento
+académico. No hay otra fuente de verdad (no se usan issues de GitHub
+ni tableros adicionales).
+
+- **Espacio:** *Mentor IA – Sistema de Aprendizaje Inteligente*
+- **List ID:** `901712277205`
+
+### 9.1 Flujo de estados de subtareas
+
+Cada subtarea ClickUp asociada a una fase del
+[`docs/specs/implementation-plan.md`](./docs/specs/implementation-plan.md)
+recorre tres estados, gestionados por el agente:
+
+1. `pendiente` — estado inicial.
+2. `en curso` — el agente la mueve aquí **al empezar** la fase.
+3. `completado` — el agente la mueve aquí **al cerrar** la fase, una
+   vez que el usuario confirma que el criterio de aceptación se cumple,
+   y añade un comentario con formato:
+   `Completado en commit <sha> — <breve descripción>`.
+
+### 9.2 Reglas de uso
+
+- **No crear nuevas tareas en ClickUp sin permiso explícito del usuario.**
+  Solo modificar las que ya existen.
+- Si una fase del implementation plan no tiene subtarea correspondiente
+  (Fase 0, 3, 8, 11, 12, 13), no forzar asociación: dejar constancia
+  en el mensaje de commit.
+- Antes de la primera mutación en ClickUp dentro de una sesión, el
+  agente avisa explícitamente al usuario. Tras el OK inicial, no
+  vuelve a preguntar para cada cambio de estado dentro de la misma
+  sesión: aplica el flujo de 3 estados automáticamente.
+
+### 9.3 Mapeo WBS ↔ Tarea padre ClickUp
+
+| Fase del WBS                          | Tarea padre   | Estado     |
+| ------------------------------------- | ------------- | ---------- |
+| 1. Inicio y Planificación             | `86e0j1nzq`   | Completada |
+| 2. Diseño del Sistema                 | `86e0j1nrp`   | Completada |
+| 3. Desarrollo del Backend             | `86e0j1ntn`   | En curso   |
+| 4. Desarrollo del Frontend            | `86e0j1ntr`   | En curso   |
+| 5. Integración y Automatización       | `86e0j1ntx`   | En curso   |
+| 6. Pruebas                            | `86e0j1ntz`   | En curso   |
+| 7. Documentación y Cierre             | `86e0j1nv4`   | En curso   |
+
+### 9.4 Mapeo Fase del implementation plan ↔ Subtarea ClickUp
+
+| Fase del plan                | Subtarea(s) ClickUp                                                |
+| ---------------------------- | ------------------------------------------------------------------ |
+| Fase 1 (scaffolding backend) | `86e0j1p1r` Implementación de la API REST con FastAPI              |
+| Fase 2 (servicios externos)  | `86e0j1p29` Integración del agente con Google Gemini (se cierra al terminar Fase 2) |
+| Fase 3 (utilidades)          | (sin subtarea directa; vincular al commit)                         |
+| Fase 4 (AgenteExtraccion)    | `86e0j1p1t` Módulo de indexación de documentos (PDF, TXT, Markdown) |
+| Fase 5 (AgenteRespuesta)     | `86e0j1p1v` Módulo de búsqueda semántica con RAG                   |
+| Fase 6 (AgentePlanRepaso)    | `86e0j1p2d` Generación de planes de estudio + `86e0j1p2j` Envío automatizado de planes por correo |
+| Fase 7 (OCR)                 | `86e0j1p1y` Módulo de OCR para extracción de texto desde imágenes  |
+| Fase 8 (scaffolding frontend)| (sin subtarea directa)                                             |
+| Fase 9 (StudyAssistant)      | `86e0j1p22` Interfaz de carga y gestión de documentos + `86e0j1p24` Interfaz del chat inteligente |
+| Fase 10 (ReviewPlan)         | `86e0j1p26` Módulo de visualización de planes de estudio           |
+| Fase 11 (StatusIndicator)    | (sin subtarea directa)                                             |
+| Fase 12 (despliegue backend) | (sin subtarea directa)                                             |
+| Fase 13 (despliegue frontend)| (sin subtarea directa)                                             |
+| Fase 14 (smoke tests finales)| `86e0j1p35` Pruebas de precisión RAG + `86e0j1p38` Pruebas de rendimiento OCR |
 
 ---
 

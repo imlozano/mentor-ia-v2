@@ -6,6 +6,26 @@
 
 ---
 
+## Vinculación con ClickUp
+
+El avance de este plan se refleja en ClickUp (espacio *Mentor IA –
+Sistema de Aprendizaje Inteligente*, lista `901712277205`). El flujo
+de estados de cada subtarea (`pendiente` → `en curso` → `completado`)
+y el mapeo detallado Fase ↔ Subtarea están en
+[`../../CLAUDE.md`](../../CLAUDE.md) §9.
+
+Mapeo de alto nivel Fase del plan ↔ Tarea padre del WBS:
+
+| Fases del implementation plan         | Tarea padre WBS                       |
+| ------------------------------------- | ------------------------------------- |
+| Fases 1–7 (backend)                   | `86e0j1ntn` Desarrollo del Backend    |
+| Fases 8–11 (frontend)                 | `86e0j1ntr` Desarrollo del Frontend   |
+| Fase 12 (despliegue backend en DO)    | (sin tarea ClickUp explícita)         |
+| Fase 13 (despliegue frontend Vercel)  | (sin tarea ClickUp explícita)         |
+| Fase 14 (smoke tests finales)         | `86e0j1ntz` Pruebas                   |
+
+---
+
 ## Fase 0 — Verificación previa (antes de tocar código)
 
 Antes de empezar, el agente confirma con el estudiante que tiene:
@@ -19,7 +39,10 @@ Antes de empezar, el agente confirma con el estudiante que tiene:
       Iterator → Aggregator → Gmail Sender". URL en `MAKE_WEBHOOK_URL`.
 - [ ] Cuenta DigitalOcean con créditos activos.
 - [ ] Cuenta Vercel conectada al repositorio GitHub.
-- [ ] Node 20+ y Python 3.11+ instalados localmente.
+- [ ] Node.js 22+ instalado (`node -v` ≥ v22).
+- [ ] pnpm 11+ instalado (`pnpm -v` ≥ 11). Si falta:
+      `corepack enable && corepack prepare pnpm@latest --activate`.
+- [ ] Python 3.11+ instalado (`python3.11 --version`).
 
 Si falta cualquiera, el agente detiene la implementación y pide al
 estudiante que lo resuelva.
@@ -47,9 +70,13 @@ respondiendo OK, aunque no haga nada útil aún.
      (sin verificar todavía).
 8. Crear `Dockerfile` y `docker-compose.yml`.
 9. Verificar localmente: `docker compose up` y `curl localhost:8000/health` devuelve 200.
+10. Verificación de seguridad inicial: `uv run pip-audit`. No debe
+    reportar vulnerabilidades de severidad alta/crítica. Si las hay,
+    documentar y discutir antes de seguir.
 
 **Criterio de aceptación de Fase 1:** `/health` responde 200 en local
-con Docker. El agente NO continúa hasta confirmarlo con el estudiante.
+con Docker y `pip-audit` no reporta vulnerabilidades críticas. El
+agente NO continúa hasta confirmarlo con el estudiante.
 
 ---
 
@@ -161,19 +188,22 @@ razonablemente con el contenido de la imagen.
 
 **Objetivo:** Next.js corriendo con shell mínimo apuntando al backend.
 
-1. Crear proyecto con `npx create-next-app@latest frontend --typescript --tailwind --app --src-dir=false --import-alias='@/*'`.
+1. Crear proyecto con `pnpm create next-app@latest frontend --typescript --tailwind --app --src-dir=false --import-alias='@/*' --use-pnpm`.
 2. Confirmar versiones: Next 16.2.x, React 19, TS 5.
-3. Instalar shadcn/ui: `npx shadcn@latest init` y luego añadir
+3. Crear `frontend/pnpm-workspace.yaml` con la configuración de
+   seguridad definida en `spec-frontend.md` §3.1 (`minimumReleaseAge: 1440`,
+   `blockExoticSubdeps: true`, `minimumReleaseAgeExclude: ['@types/*']`).
+4. Instalar shadcn/ui: `pnpm dlx shadcn@latest init` y luego añadir
    componentes uno por uno: `alert`, `badge`, `button`, `card`, `input`,
    `label`, `radio-group`, `scroll-area`, `separator`, `skeleton`,
-   `tabs`, `textarea`.
-4. Instalar `lucide-react`.
-5. Crear `lib/types.ts` y `lib/api.ts` según spec sección 4 y 5.
-6. Crear `.env.local.example`.
-7. Crear `app/layout.tsx` con Inter, lang="es", metadata.
-8. Crear `app/page.tsx` con los dos tabs principales vacíos.
+   `tabs`, `textarea` (con `pnpm dlx shadcn@latest add <componente>`).
+5. Instalar `lucide-react` con `pnpm add lucide-react`.
+6. Crear `lib/types.ts` y `lib/api.ts` según spec sección 4 y 5.
+7. Crear `.env.local.example`.
+8. Crear `app/layout.tsx` con Inter, lang="es", metadata.
+9. Crear `app/page.tsx` con los dos tabs principales vacíos.
 
-**Criterio de aceptación de Fase 8:** `npm run dev` levanta y se ve
+**Criterio de aceptación de Fase 8:** `pnpm dev` levanta y se ve
 el header con tabs (sin contenido todavía).
 
 ---

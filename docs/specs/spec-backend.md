@@ -60,7 +60,9 @@ backend/
 
 ## 3. Dependencias
 
-Mínimas necesarias en `pyproject.toml`:
+### 3.1 Dependencias de producción
+
+Mínimas necesarias en `pyproject.toml` bajo `[project].dependencies`:
 
 ```
 fastapi
@@ -77,8 +79,35 @@ loguru
 python-dotenv                     # solo en dev
 ```
 
-Versiones exactas que las defina el agente con `uv` o `poetry`,
-priorizando estables más recientes.
+Versiones exactas que las defina el agente con `uv`, priorizando
+estables más recientes.
+
+### 3.2 Dependencias de desarrollo
+
+Bajo `[dependency-groups.dev]` (o el grupo equivalente que use `uv`):
+
+```
+pip-audit                         # auditoría de seguridad CVEs
+```
+
+Se ejecuta puntualmente con `uv run pip-audit` para detectar
+vulnerabilidades conocidas en el árbol de dependencias.
+
+### 3.3 Configuración de seguridad de `uv` (cooldown de cadena de suministro)
+
+Añadir a `pyproject.toml`:
+
+```toml
+[tool.uv]
+exclude-newer = "7 days"
+```
+
+**Justificación:** ignora paquetes publicados en los últimos 7 días
+para dar tiempo a la comunidad a detectar versiones comprometidas
+antes de instalarlas (cf. ataque LiteLLM/Telnyx, marzo 2026, donde
+versiones maliciosas fueron retiradas dentro de los primeros días tras
+publicación). Es el equivalente Python al `minimumReleaseAge: 1440` de
+pnpm en el frontend (ver `spec-frontend.md` §3.1).
 
 ## 4. Modelos Pydantic (`models.py`)
 

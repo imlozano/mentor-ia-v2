@@ -30,12 +30,20 @@ Despliegue en Vercel. La URL del backend se configura con
 - lucide-react para iconografía.
 - Sin librerías de estado globales (Zustand, Redux). React state es
   suficiente para el alcance.
+- **Gestor de paquetes:** `pnpm` 11+ (NO `npm` ni `yarn`). Activa por
+  defecto `minimumReleaseAge: 1440` (cooldown de 24 h sobre nuevas
+  versiones publicadas) y `blockExoticSubdeps: true` (bloquea
+  sub-dependencias con protocolos exóticos como `git+`, `file:`,
+  `http:`). Esto mitiga ataques de cadena de suministro tipo
+  Shai-Hulud 2.0 y el compromiso de Axios.
+- **Runtime:** Node.js 22+ (requerido por Next 16 y por pnpm 11).
 
 ## 3. Estructura de archivos
 
 ```
 frontend/
 ├── package.json
+├── pnpm-workspace.yaml            Config de seguridad de pnpm (ver §3.1)
 ├── tsconfig.json
 ├── next.config.ts
 ├── tailwind.config.ts             (si Tailwind 4 lo requiere)
@@ -64,6 +72,32 @@ frontend/
 └── public/
     └── icons/                     (favicons, etc.)
 ```
+
+### 3.1 `pnpm-workspace.yaml` — configuración de seguridad
+
+Aunque `frontend/` no usa workspaces de pnpm, este archivo es el lugar
+canónico donde pnpm 11+ lee la configuración global del proyecto.
+Contenido obligatorio:
+
+```yaml
+# Cooldown de 24 h sobre nuevas versiones publicadas (1440 minutos).
+# Da tiempo a la comunidad a detectar versiones comprometidas antes de
+# que pnpm las instale. Defensa frente a ataques tipo Shai-Hulud 2.0 y
+# el compromiso reciente de Axios. Activa automáticamente strict mode.
+minimumReleaseAge: 1440
+
+# Excepción: los paquetes de @types/* no ejecutan código (solo declaran
+# tipos), por lo que el cooldown no aporta seguridad y sí estorba.
+minimumReleaseAgeExclude:
+  - '@types/*'
+
+# Bloquea sub-dependencias con protocolos exóticos (git+, file:, http:)
+# que no se pueden auditar igual que las del registry.
+blockExoticSubdeps: true
+```
+
+Si en el futuro se introducen workspaces, este archivo añadirá la clave
+`packages:`; las claves de seguridad de arriba se mantienen.
 
 ## 4. Tipos compartidos (`lib/types.ts`)
 
@@ -388,9 +422,9 @@ versión (queda para mejora futura).
 
 El frontend está terminado cuando:
 
-- [ ] `npm run dev` arranca sin errores ni warnings de TypeScript.
-- [ ] `npm run build` produce un build sin errores.
-- [ ] `npm run lint` pasa limpio.
+- [ ] `pnpm dev` arranca sin errores ni warnings de TypeScript.
+- [ ] `pnpm build` produce un build sin errores.
+- [ ] `pnpm lint` pasa limpio.
 - [ ] Subir un PDF desde la UI muestra mensaje de éxito en el chat.
 - [ ] Hacer una consulta muestra burbuja con respuesta y fuentes (si
       hay match RAG).
