@@ -11,7 +11,7 @@
 Antes de empezar, el agente confirma con el estudiante que tiene:
 
 - [ ] `GEMINI_API_KEY` con acceso a `gemini-flash-latest` y
-      `text-embedding-004`.
+      `gemini-embedding-001` (verificar con `outputDimensionality=768`).
 - [ ] Cuenta en Qdrant Cloud con cluster activo. Variables `QDRANT_URL`
       y `QDRANT_API_KEY` listas.
 - [ ] Credenciales JSON de Google Cloud Vision API descargadas.

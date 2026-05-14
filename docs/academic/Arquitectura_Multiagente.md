@@ -128,8 +128,8 @@ convención) o un documento individual recién subido.
    [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md) para la
    justificación).
 4. **Generación de embeddings.** Llama a la API de Gemini
-   (`text-embedding-004`) por lotes para obtener vectores de 768
-   dimensiones.
+   (`gemini-embedding-001` con `outputDimensionality=768`) por lotes y
+   renormaliza cada vector resultante a norma 1.
 5. **Upsert en Qdrant.** Crea los `PointStruct` con `id`, `vector` y
    `payload`, y los inserta en la colección.
 
@@ -150,8 +150,9 @@ origen.
 
 **Subtareas internas:**
 
-1. **Embedding de la pregunta.** Llama a `text-embedding-004` para
-   obtener el vector de la consulta.
+1. **Embedding de la pregunta.** Llama a `gemini-embedding-001` con
+   `outputDimensionality=768` para obtener el vector de la consulta,
+   renormalizado a norma 1.
 2. **Búsqueda semántica.** Llama a `Qdrant.query_points` con el vector
    de la pregunta y obtiene los `top_k` chunks más similares.
 3. **Filtrado por score.** Solo considera fuentes que superen un umbral

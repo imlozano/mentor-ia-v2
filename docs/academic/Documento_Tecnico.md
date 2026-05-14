@@ -156,7 +156,7 @@ flowchart LR
     APR -->|query_points| QD
     AE -->|OCR imágenes| GV[Google Vision<br/>DOCUMENT_TEXT_DETECTION]
     BE -->|/ocr-imagen| GV
-    AE -->|embed_documents| GE[Gemini<br/>text-embedding-004]
+    AE -->|embed_documents| GE[Gemini<br/>gemini-embedding-001<br/>outputDimensionality=768]
     AR -->|embed_query + LLM| GE
     APR -->|embed_query + LLM| GE
     APR -->|webhook plan| MK[Make.com<br/>Custom Webhook]
@@ -228,7 +228,7 @@ agentes invoca, qué servicios externos consume) está en
 | Colección               | `mentor_ia_aprendizaje`                                |
 | Dimensión del vector    | 768                                                    |
 | Distancia               | COSINE                                                 |
-| Modelo de embeddings    | `text-embedding-004` (Google Gemini)                   |
+| Modelo de embeddings    | `gemini-embedding-001` (Google Gemini) con `outputDimensionality=768` (MRL) |
 
 El detalle del modelo de datos vectorial está en
 [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md).
@@ -238,7 +238,7 @@ El detalle del modelo de datos vectorial está en
 | Servicio                          | Uso                                              |
 | --------------------------------- | ------------------------------------------------ |
 | Google Gemini `gemini-flash-latest` | Generación de respuestas y planes de repaso     |
-| Google Gemini `text-embedding-004`  | Generación de vectores de 768 dimensiones       |
+| Google Gemini `gemini-embedding-001` | Generación de vectores truncados a 768 dimensiones con MRL (`outputDimensionality=768`) |
 | Google Cloud Vision                 | OCR con `DOCUMENT_TEXT_DETECTION`                |
 
 ### 5.5 Automatización
@@ -299,7 +299,7 @@ Se eligió **Google Gemini** principalmente porque:
 
 - Ofrece un tier gratuito real con suficiente cuota para un proyecto
   académico.
-- El modelo de embeddings (`text-embedding-004`) es gratuito hasta un
+- El modelo de embeddings (`gemini-embedding-001`) es gratuito hasta un
   límite generoso.
 - El servicio OCR de Google Cloud (Vision) se integra naturalmente con
   el ecosistema Google Cloud, evitando configurar otro proveedor.
@@ -309,18 +309,27 @@ saldo prepago desde el primer uso y su API de embeddings tiene costo.
 
 ### 6.4 ¿Por qué 768 dimensiones y distancia coseno?
 
-La dimensión 768 no es una decisión libre: la impone el modelo
-`text-embedding-004`. Cualquier vector almacenado en la colección debe
-tener exactamente esa dimensión, o Qdrant rechaza la inserción.
+La dimensión 768 se mantiene como parámetro fijo del sistema, anclando
+la colección Qdrant a un tamaño estable. Con el modelo histórico
+`text-embedding-004` (deprecado el 14 de enero de 2026) la dimensión
+era nativa del modelo; con el reemplazo `gemini-embedding-001` se
+obtiene mediante el parámetro `outputDimensionality=768` que aplica
+**Matryoshka Representation Learning (MRL)** sobre el vector original
+de 3072 dimensiones (ver §6.7).
 
 La distancia **COSINE** se eligió porque:
 
 - Es la métrica nativa para embeddings semánticos: mide similitud de
   dirección entre vectores, ignorando la magnitud.
-- Funciona bien con embeddings normalizados (que es como los entrega
-  Gemini).
-- Es la métrica recomendada por la propia documentación de Google para
-  `text-embedding-004`.
+- Funciona bien con embeddings normalizados (norma 1).
+- Es la métrica recomendada por la documentación de Google Gemini para
+  embeddings semánticos.
+
+Una consecuencia operativa del cambio a `gemini-embedding-001`: al
+truncar con MRL los vectores resultantes pierden la norma unitaria
+(medido empíricamente: norma ≈ 0.57 en pruebas locales). El wrapper
+`services/gemini.py` debe **renormalizar cada vector** antes de
+upsertear en Qdrant, de lo contrario la métrica COSINE se degrada.
 
 Las alternativas (euclidiana, producto punto) serían válidas pero menos
 apropiadas para texto.
@@ -353,6 +362,83 @@ progresivamente el intervalo. No se implementó un algoritmo adaptativo
 (que ajuste el intervalo según el desempeño del estudiante) porque eso
 requeriría un sistema de seguimiento de progreso fuera del alcance del
 prototipo.
+
+### 6.7 Migración de `text-embedding-004` a `gemini-embedding-001`
+
+El sistema fue diseñado originalmente para usar el modelo de embeddings
+`text-embedding-004` de Google Gemini. Sin embargo, durante la
+preparación de la entrega final se identificó que ese modelo fue
+**deprecado y apagado el 14 de enero de 2026** según el calendario
+oficial de Google ([Gemini API deprecations](https://ai.google.dev/gemini-api/docs/deprecations)).
+Esta sección documenta la decisión de migración.
+
+#### 6.7.1 ¿Por qué hubo que migrar?
+
+El apagado de `text-embedding-004` no es un cambio opcional: las
+llamadas al modelo retornan error y rompen la cadena de ingesta y
+consulta. La migración era, por tanto, **obligatoria** para que el
+sistema siguiera siendo funcional a fecha de la entrega.
+
+#### 6.7.2 ¿Por qué `gemini-embedding-001` y no `gemini-embedding-2`?
+
+Google ofrece dos modelos posteriores como sucesores. Se evaluaron
+ambos:
+
+| Criterio                              | `gemini-embedding-001`           | `gemini-embedding-2`              |
+| ------------------------------------- | -------------------------------- | --------------------------------- |
+| Estado oficial                        | GA estable (desde julio 2025)    | Más reciente (abril 2026)         |
+| Reemplazo oficial de `text-embedding-004` | Sí (documentado por Google)  | No (sucesor de gen anterior)      |
+| Modalidad                             | Solo texto                       | Multimodal (texto, imagen, audio) |
+| Soporte de `outputDimensionality` (MRL) | Sí (128–3072)                  | Sí (128–3072)                     |
+| Adecuación al alcance académico       | Alta (estable y defendible)      | Menor (introduce complejidad innecesaria) |
+
+Se eligió **`gemini-embedding-001`** porque es el reemplazo oficial
+documentado por Google, está en disponibilidad general (GA) desde julio
+de 2025 y su comportamiento es estable. `gemini-embedding-2` añade
+multimodalidad que el sistema actual no necesita (el OCR de imágenes lo
+hace Google Cloud Vision en una capa anterior; ver §4.1) y, al ser más
+reciente, su estabilidad a largo plazo es menos predecible. Para un
+prototipo académico que se defiende en sustentación, la opción
+conservadora y documentada es preferible.
+
+#### 6.7.3 ¿Por qué 768 dimensiones con MRL en lugar de las 3072 nativas?
+
+`gemini-embedding-001` produce por defecto vectores de 3072 dimensiones.
+El sistema usa 768 mediante el parámetro `outputDimensionality=768`,
+que aplica **Matryoshka Representation Learning (MRL)** sobre el vector
+original. MRL es una técnica de entrenamiento (Kusupati et al.,
+*NeurIPS 2022*) que permite truncar el vector preservando la mayor
+parte de la calidad semántica.
+
+Las razones para fijar 768 dimensiones son tres:
+
+1. **Compatibilidad con la decisión previa de Qdrant.** La colección
+   `mentor_ia_aprendizaje` ya fue creada con `size=768` y
+   `distance=COSINE`. Migrar a 3072 obligaría a borrar la colección,
+   recrearla y re-indexar todo el corpus. Mantener 768 limita el
+   alcance del cambio al wrapper del modelo.
+2. **Eficiencia operativa.** Un vector de 768 dimensiones ocupa 4 veces
+   menos memoria que uno de 3072 y la búsqueda por similitud en Qdrant
+   es proporcionalmente más rápida. Para el corpus académico esperado
+   (decenas de documentos) ambos serían viables, pero 768 es más
+   eficiente sin pérdida práctica de calidad.
+3. **Calidad preservada por MRL.** El truncamiento Matryoshka no es un
+   recorte arbitrario: el modelo se entrenó para que los primeros
+   componentes del vector concentren la mayor cantidad de información
+   semántica. Esto permite usar 768 dims con calidad comparable a
+   modelos diseñados nativamente para 768.
+
+#### 6.7.4 Detalle técnico: renormalización post-truncamiento
+
+Al truncar un vector con MRL, su norma euclídea deja de ser exactamente
+1. En pruebas locales con `gemini-embedding-001` y
+`outputDimensionality=768`, la norma de los vectores devueltos es del
+orden de 0.57. Como la distancia COSINE en Qdrant está optimizada para
+vectores unitarios, el wrapper `services/gemini.py` aplica una
+**renormalización explícita** (divide cada componente por la norma
+euclídea) antes de retornar el vector. Esto garantiza que la métrica
+COSINE en Qdrant siga siendo equivalente al producto punto y no se
+degrade la calidad de la búsqueda.
 
 ---
 

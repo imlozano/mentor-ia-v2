@@ -38,7 +38,7 @@ usuario las contradice, el agente debe preguntar antes de proceder.
 | Estilos         | Tailwind CSS 4 + shadcn/ui sobre Radix Primitives       |
 | Backend         | FastAPI + Python 3.11+                                  |
 | Base vectorial  | Qdrant Cloud, colección `mentor_ia_aprendizaje`, 768 dim, COSINE |
-| Embeddings      | Google Gemini `text-embedding-004` (768 dim)             |
+| Embeddings      | Google Gemini `gemini-embedding-001` con `outputDimensionality=768` (MRL, vectores renormalizados) |
 | LLM             | Google Gemini `gemini-flash-latest`                     |
 | OCR             | Google Cloud Vision `DOCUMENT_TEXT_DETECTION`           |
 | Email           | Make.com Custom Webhook + Gmail Sender                  |

@@ -53,7 +53,7 @@ flowchart LR
     APR -->|query_points| QD
     AE -->|OCR PDF/IMG| GV[Google Vision REST]
     BE -->|/ocr-imagen| GV
-    AE -->|embed_documents| GE[Gemini<br/>text-embedding-004]
+    AE -->|embed_documents| GE[Gemini<br/>gemini-embedding-001<br/>outputDimensionality=768]
     AR -->|embed_query + LLM| GE
     APR -->|embed_query + LLM| GE
     APR -->|webhook plan + email| MK[Make.com<br/>Custom Webhook]
@@ -69,7 +69,9 @@ Stack confirmado:
 - **Base vectorial:** Qdrant Cloud, colección `mentor_ia_aprendizaje`,
   768 dimensiones, distancia COSINE.
 - **LLM y embeddings:** Google Gemini (`gemini-flash-latest`,
-  `text-embedding-004`).
+  `gemini-embedding-001` con `outputDimensionality=768` y
+  renormalización a norma 1; ver
+  [`Documento_Tecnico.md`](./Documento_Tecnico.md) §6.7).
 - **OCR:** Google Cloud Vision (`DOCUMENT_TEXT_DETECTION` por REST).
 - **Automatización:** Make.com (webhook + iterator + aggregator + Gmail).
 

@@ -247,7 +247,8 @@ class AgenteRespuesta:
 
 Reglas:
 
-- Embedding de la pregunta con `text-embedding-004`.
+- Embedding de la pregunta con `gemini-embedding-001`
+  (`outputDimensionality=768`, renormalizado a norma unitaria).
 - `query_points` sobre Qdrant con `limit=top_k`.
 - Filtrar por umbral. Si quedan ≥1 fuentes: RAG. Si no: modelo solo.
 - Prompt RAG: incluye los chunks como contexto numerado y la pregunta
@@ -288,16 +289,32 @@ Wrapper del SDK `google-genai`. Métodos:
 ```python
 class GeminiService:
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Devuelve vectores de 768 dim. Llama en batches."""
+        """Devuelve vectores de 768 dim, renormalizados a norma 1. Llama en batches."""
 
-    async def embed_query(self, text: str) -> list[float]: ...
+    async def embed_query(self, text: str) -> list[float]:
+        """Igual que embed_texts pero para un único texto."""
 
     async def generate(self, prompt: str, system: str | None = None) -> str: ...
+
+    @staticmethod
+    def _normalize(vec: list[float]) -> list[float]:
+        """Renormaliza un vector a norma euclídea 1. Necesario tras truncar
+        con outputDimensionality (MRL): los embeddings truncados pierden
+        la norma unitaria y degradan COSINE en Qdrant."""
+        import math
+        norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+        return [x / norm for x in vec]
 ```
 
 Modelos:
 - LLM: `gemini-flash-latest`.
-- Embeddings: `text-embedding-004`.
+- Embeddings: `gemini-embedding-001` (reemplazo GA de `text-embedding-004`,
+  deprecado 14-ene-2026). Se llama con
+  `outputDimensionality=settings.embedding_output_dimensionality` (768).
+  Tras la llamada **es obligatorio aplicar `_normalize()`** a cada vector
+  antes de devolverlo o upsertearlo: el truncamiento MRL produce vectores
+  con norma ≠ 1 (medido empíricamente: ≈ 0.57), lo que degrada la métrica
+  COSINE en Qdrant.
 
 ### 7.2 `services/vision.py`
 
@@ -347,7 +364,8 @@ class Settings(BaseSettings):
     make_webhook_url: str | None = None
     base_docs_dir: Path = Path("./data/ejemplos")
     cors_origins: list[str] = ["http://localhost:3000"]
-    embedding_model: str = "text-embedding-004"
+    embedding_model: str = "gemini-embedding-001"
+    embedding_output_dimensionality: int = 768
     llm_model: str = "gemini-flash-latest"
     embedding_dim: int = 768
     chunk_max_chars: int = 900

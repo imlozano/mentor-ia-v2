@@ -63,7 +63,7 @@ mentor-ia-v2/
 | Frontend   | Vercel (gratis)                               |
 | Backend    | DigitalOcean Droplet con Docker Compose       |
 | Vectorial  | Qdrant Cloud (tier gratuito 1 GB)             |
-| LLM/Embeddings | Google Gemini (`gemini-flash-latest`, `text-embedding-004`) |
+| LLM/Embeddings | Google Gemini (`gemini-flash-latest`, `gemini-embedding-001` con `outputDimensionality=768`) |
 | OCR        | Google Cloud Vision (`DOCUMENT_TEXT_DETECTION`) |
 | Email      | Make.com Custom Webhook + Gmail Sender        |
 

@@ -35,7 +35,7 @@ en el sistema, tal como está implementado en
 | Colección                     | `mentor_ia_aprendizaje` (configurable vía env `QDRANT_COLLECTION`)       |
 | Dimensión del vector          | 768                                                                     |
 | Distancia                     | COSINE                                                                  |
-| Modelo de embeddings          | `text-embedding-004` (Google Gemini)                                    |
+| Modelo de embeddings          | `gemini-embedding-001` (Google Gemini) con `outputDimensionality=768` y renormalización |
 | Tamaño de chunk               | 900 caracteres                                                          |
 | Solape entre chunks           | 150 caracteres                                                          |
 | Máximo de chunks por documento | 100                                                                    |
@@ -69,19 +69,36 @@ client.create_collection(
 
 ### 2.2 Justificación de la dimensión 768
 
-La dimensión 768 **no es una elección libre**: la impone el modelo
-`text-embedding-004` de Google Gemini, que produce vectores de
-exactamente esa longitud. Si la colección se configurara con cualquier
-otro valor, Qdrant rechazaría las inserciones con un error de tamaño.
+La dimensión 768 es una **decisión de diseño anclada al sistema**,
+no una imposición del modelo actual. Originalmente venía dada por
+`text-embedding-004` (que producía nativamente vectores de 768 dim),
+pero tras la deprecación de ese modelo el sistema migró a
+`gemini-embedding-001`, cuya salida nativa es de 3072 dimensiones. La
+dimensión 768 se conserva mediante el parámetro
+`outputDimensionality=768`, que aplica **Matryoshka Representation
+Learning (MRL)** para truncar el vector preservando su calidad
+semántica.
+
+Mantener 768 (en lugar de migrar a 3072 nativos) responde a tres
+razones: compatibilidad con la colección Qdrant ya configurada,
+eficiencia operativa (vectores 4× más pequeños) y calidad equivalente
+gracias a MRL. La justificación completa de esta decisión está en
+[`Documento_Tecnico.md`](./Documento_Tecnico.md) sección 6.7.
 
 Esto tiene una consecuencia importante de diseño: la dimensión está
-acoplada al modelo de embeddings. Si en el futuro se quisiera migrar a
-un modelo diferente (por ejemplo, OpenAI `text-embedding-3-small` que
-produce vectores de 1536 dimensiones), no bastaría con cambiar la
-llamada al API: habría que crear una colección nueva con la dimensión
-correcta y re-indexar todo el corpus. Esta es una de las razones para
-documentar `embedding_model` y `embedding_dim` en el payload (ver
-sección 6).
+acoplada a la **configuración** del modelo de embeddings. Si en el
+futuro se quisiera migrar a un modelo diferente (por ejemplo, OpenAI
+`text-embedding-3-small` con 1536 dimensiones), no bastaría con
+cambiar la llamada al API: habría que crear una colección nueva con la
+dimensión correcta y re-indexar todo el corpus. Esta es una de las
+razones para documentar `embedding_model` y `embedding_dim` en el
+payload (ver sección 6).
+
+**Nota operativa.** Tras truncar con MRL, los vectores no quedan
+normalizados a norma 1 (se observa empíricamente norma ≈ 0.57). Como
+la métrica COSINE en Qdrant trabaja idealmente sobre vectores
+unitarios, el wrapper `services/gemini.py` aplica una renormalización
+explícita antes de upsertear.
 
 ### 2.3 Justificación de la distancia COSINE
 
@@ -92,10 +109,12 @@ deseable porque:
 - Los embeddings semánticos codifican el significado en la **dirección**
   del vector, no en su tamaño.
 - COSINE es la métrica recomendada explícitamente por la documentación
-  de Google para `text-embedding-004`.
-- Los vectores de Gemini ya vienen normalizados (norma ≈ 1), así que
-  COSINE y producto punto darían resultados equivalentes; pero COSINE
-  es más legible al interpretarse como similitud entre 0 y 1.
+  de Google Gemini para embeddings semánticos.
+- Los vectores se renormalizan a norma 1 en `services/gemini.py` tras
+  el truncamiento MRL (con `gemini-embedding-001` la salida cruda no
+  está unitarizada), así que COSINE y producto punto dan resultados
+  equivalentes; pero COSINE es más legible al interpretarse como
+  similitud entre 0 y 1.
 
 Alternativas evaluadas y descartadas:
 
@@ -287,7 +306,7 @@ Añadir cinco campos al payload:
   "chunk_index": 0,
 
   "document_id": "uuid-v5-del-documento",
-  "embedding_model": "text-embedding-004",
+  "embedding_model": "gemini-embedding-001",
   "embedding_dim": 768,
   "schema_version": "v2",
   "created_at": "2026-05-11T18:30:00Z"
@@ -331,7 +350,7 @@ Estos índices habilitan filtros eficientes para casos futuros como:
 
 - "Buscar solo en imágenes" (`filter: tipo_fuente == "image"`).
 - "Buscar dentro de un documento específico" (`filter: document_id == X`).
-- "Re-indexar todos los chunks del modelo viejo" (`filter: embedding_model != "text-embedding-004"`).
+- "Re-indexar todos los chunks del modelo viejo" (`filter: embedding_model != "gemini-embedding-001"`).
 
 Esto resuelve la limitación 5.2.
 
@@ -356,13 +375,19 @@ esquema.
 
 Cuatro puntos clave sobre el modelo de datos:
 
-1. **La dimensión 768 y la distancia COSINE no son arbitrarias.** La
-   dimensión la impone el modelo `text-embedding-004` y la distancia
-   COSINE es la métrica recomendada por Google para embeddings
-   semánticos normalizados. Si te preguntan "¿por qué no euclidiana?",
-   la respuesta es: "porque los vectores de Gemini están normalizados,
-   así que la magnitud no aporta información; coseno mide solo
-   dirección, que es lo que codifica el significado".
+1. **La dimensión 768 y la distancia COSINE no son arbitrarias.** El
+   sistema usa `gemini-embedding-001` (reemplazo oficial de
+   `text-embedding-004`, deprecado el 14-ene-2026) con
+   `outputDimensionality=768` aplicando Matryoshka Representation
+   Learning: se obtienen las 768 dimensiones más informativas del
+   vector original de 3072. COSINE es la métrica recomendada por
+   Google para embeddings semánticos. Si te preguntan "¿por qué no
+   euclidiana?", la respuesta es: "porque tras renormalizar los
+   vectores a norma 1, la magnitud no aporta información; coseno mide
+   solo dirección, que es lo que codifica el significado". La
+   justificación completa de la migración del modelo y de mantener 768
+   vs 3072 está en [`Documento_Tecnico.md`](./Documento_Tecnico.md)
+   sección 6.7.
 
 2. **El chunking 900/150 balancea precisión y contexto.** Chunks más
    pequeños serían más precisos pero perderían contexto; más grandes
