@@ -1,3 +1,8 @@
+---
+description: 
+alwaysApply: true
+---
+
 # CLAUDE.md — Instrucciones para agentes de IA en este repositorio
 
 Este archivo lo lee Claude Code (o cualquier otro agente) cada vez que se
