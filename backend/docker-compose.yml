@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mentor-ia-backend:dev
+    container_name: mentor-ia-backend
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      JSON_LOGS: "0"
+      LOG_LEVEL: "INFO"
+    volumes:
+      - ./data/ejemplos:/app/data/ejemplos
+      - ./credentials:/app/credentials:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).getcode() == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

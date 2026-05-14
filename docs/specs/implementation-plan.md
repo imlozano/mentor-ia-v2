@@ -70,13 +70,18 @@ respondiendo OK, aunque no haga nada útil aún.
      (sin verificar todavía).
 8. Crear `Dockerfile` y `docker-compose.yml`.
 9. Verificar localmente: `docker compose up` y `curl localhost:8000/health` devuelve 200.
-10. Verificación de seguridad inicial: `uv run pip-audit`. No debe
-    reportar vulnerabilidades de severidad alta/crítica. Si las hay,
-    documentar y discutir antes de seguir.
+10. Verificación de seguridad inicial con `uv run pip-audit`.
+    Vulnerabilidades de severidad **High o Critical** son bloqueantes.
+    Vulnerabilidades **Moderate o Low** se analizan caso por caso y, si
+    no aplican al contexto del sistema, se documentan en
+    [`security-known-issues.md`](./security-known-issues.md) antes de
+    cerrar la fase.
 
 **Criterio de aceptación de Fase 1:** `/health` responde 200 en local
-con Docker y `pip-audit` no reporta vulnerabilidades críticas. El
-agente NO continúa hasta confirmarlo con el estudiante.
+con Docker y `pip-audit` no reporta vulnerabilidades High/Critical sin
+resolver. Los hallazgos Moderate/Low quedan documentados en
+`security-known-issues.md`. El agente NO continúa hasta confirmarlo con
+el estudiante.
 
 ---
 
@@ -290,6 +295,9 @@ Una sesión completa antes del 20 de mayo:
       entrada.
 - [ ] Hacer al menos 3 OCR con imágenes diferentes.
 - [ ] Verificar el badge "Online" en producción.
+- [ ] Re-auditar dependencias con `uv run pip-audit`. Actualizar
+      [`security-known-issues.md`](./security-known-issues.md) con el
+      estado actual y mover CVEs resueltos a la sección histórica.
 - [ ] Tomar screenshots de cada flujo para incluir en el documento
       académico.
 
