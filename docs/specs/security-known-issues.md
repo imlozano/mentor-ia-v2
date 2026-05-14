@@ -29,62 +29,9 @@ Las mismas reglas aplican al backend (`uv run pip-audit`) y al frontend
 
 ## 2. CVEs conocidos no aplicables (a fecha 2026-05-14)
 
-### 2.1 CVE-2026-44431 — `urllib3` <2.7.0 — header leak en cross-origin redirects
-
-| Campo                                | Valor                                                              |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| Identificador                        | CVE-2026-44431 (alias GHSA-qccp-gfcp-xxvc)                         |
-| Paquete                              | `urllib3` 2.6.3 (transitive de `google-genai`, `qdrant-client`, `httpx`) |
-| Severidad GHSA                       | Moderate                                                           |
-| Fix disponible                       | `urllib3` 2.7.0                                                    |
-| Publicación de urllib3 2.7.0 en PyPI | 2026-05-07 a las 16:13 UTC                                         |
-| Fin del cooldown de 7 días           | 2026-05-14 a las 16:13 UTC                                         |
-| Re-auditoría programada              | 2026-05-15 o posterior                                             |
-
-**Descripción del CVE.** En cross-origin redirects seguidos vía la API
-de bajo nivel
-`ProxyManager.connection_from_url().urlopen(..., assert_same_host=False)`,
-los headers sensibles (`Authorization`, `Cookie`,
-`Proxy-Authorization`) no se eliminan, mientras que sí se eliminan al
-usar las APIs de alto nivel `urllib3.request()`,
-`PoolManager.request()` y `ProxyManager.request()`.
-
-**Por qué no aplica a Mentor IA.** El backend no instancia
-`ProxyManager`, no usa la API de bajo nivel
-`connection_from_url().urlopen()` y no sigue redirects cross-origin con
-`assert_same_host=False`. `urllib3` entra solo como dependencia
-transitive de `google-genai`, `qdrant-client` y `httpx`; las tres
-librerías construyen sus clientes HTTP sobre APIs de alto nivel, que sí
-eliminan los headers sensibles en redirects.
-
----
-
-### 2.2 CVE-2026-44432 — `urllib3` <2.7.0 — consumo excesivo de recursos en streaming con decompresión
-
-| Campo                                | Valor                                                              |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| Identificador                        | CVE-2026-44432 (alias GHSA-mf9v-mfxr-j63j)                         |
-| Paquete                              | `urllib3` 2.6.3 (transitive de `google-genai`, `qdrant-client`, `httpx`) |
-| Severidad GHSA                       | Moderate                                                           |
-| Fix disponible                       | `urllib3` 2.7.0                                                    |
-| Publicación de urllib3 2.7.0 en PyPI | 2026-05-07 a las 16:13 UTC                                         |
-| Fin del cooldown de 7 días           | 2026-05-14 a las 16:13 UTC                                         |
-| Re-auditoría programada              | 2026-05-15 o posterior                                             |
-
-**Descripción del CVE.** Al consumir respuestas HTTP comprimidas con
-`Content-Encoding: br|gzip|zstd|deflate` mediante la API de streaming
-de urllib3, ciertos flujos (segunda llamada a
-`HTTPResponse.read(amt=N)` con respuesta Brotli decodificada por la
-librería oficial `brotli`, o llamada a `HTTPResponse.drain_conn()` tras
-lectura parcial) decodifican toda la respuesta en lugar del trozo
-solicitado, generando consumo excesivo de CPU y memoria (CWE-409).
-
-**Por qué no aplica a Mentor IA.** El backend solo realiza requests
-HTTP salientes a cuatro endpoints confiables y bajo control conocido:
-Gemini, Qdrant Cloud, Google Cloud Vision y Make.com. No consume
-respuestas comprimidas desde fuentes no confiables. No usa
-`HTTPResponse.drain_conn()` ni la librería oficial `brotli` (no es
-dependencia directa ni transitive del proyecto).
+No hay CVEs Moderate/Low activos documentados como "no aplicables"
+después de actualizar `urllib3` a `2.7.0` y re-ejecutar
+`uv run pip-audit` el 2026-05-14.
 
 ---
 
@@ -153,6 +100,32 @@ implementación.
    resolverá la versión con fix sin intervención manual. La Fase 14
    del plan de implementación incluye una re-auditoría sistemática
    para mover los CVEs resueltos al histórico de este archivo.
+
+---
+
+## 5. Histórico de CVEs resueltos
+
+### 5.1 CVE-2026-44431 — `urllib3` header leak en redirects cross-origin
+
+| Campo                           | Valor                                                           |
+| ------------------------------- | --------------------------------------------------------------- |
+| Identificador                   | CVE-2026-44431 (GHSA-qccp-gfcp-xxvc)                           |
+| Dependencia afectada            | `urllib3` `<2.7.0`                                              |
+| Estado                          | Resuelto                                                        |
+| Acción aplicada                 | Upgrade a `urllib3==2.7.0` (`uv lock --upgrade-package urllib3`) |
+| Verificación                    | `uv run pip-audit`: sin vulnerabilidades conocidas              |
+| Fecha resolución (UTC)          | 2026-05-14                                                      |
+
+### 5.2 CVE-2026-44432 — `urllib3` consumo excesivo en streaming+decompress
+
+| Campo                           | Valor                                                           |
+| ------------------------------- | --------------------------------------------------------------- |
+| Identificador                   | CVE-2026-44432 (GHSA-mf9v-mfxr-j63j)                           |
+| Dependencia afectada            | `urllib3` `<2.7.0`                                              |
+| Estado                          | Resuelto                                                        |
+| Acción aplicada                 | Upgrade a `urllib3==2.7.0` (`uv lock --upgrade-package urllib3`) |
+| Verificación                    | `uv run pip-audit`: sin vulnerabilidades conocidas              |
+| Fecha resolución (UTC)          | 2026-05-14                                                      |
 
 ---
 
