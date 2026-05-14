@@ -9,8 +9,16 @@ from loguru import logger
 from starlette.responses import Response
 
 from src.agentes.agente_extraccion import AgenteExtraccion
+from src.agentes.agente_respuesta import AgenteRespuesta
 from src.logger import setup_logging
-from src.models import DocumentosResponse, DocumentoIndexado, HealthResponse, UploadResponse
+from src.models import (
+    DocumentosResponse,
+    DocumentoIndexado,
+    HealthResponse,
+    QueryRequest,
+    QueryResponse,
+    UploadResponse,
+)
 from src.services.gemini import GeminiService
 from src.services.make_webhook import MakeWebhookService
 from src.services.qdrant_client import QdrantService
@@ -38,6 +46,10 @@ async def lifespan(app: FastAPI):
         gemini_service=app.state.gemini,
         vision_service=app.state.vision,
         settings=settings,
+    )
+    app.state.agente_respuesta = AgenteRespuesta(
+        qdrant_client=app.state.qdrant,
+        gemini_service=app.state.gemini,
     )
 
     logger.bind(version=VERSION, cors_origins=settings.cors_origins).info(
@@ -207,3 +219,22 @@ async def documentos_indexados(request: Request) -> DocumentosResponse:
         total_chunks=total_chunks,
         total_documentos=len(documentos),
     )
+
+
+@app.post("/query", response_model=QueryResponse)
+async def query_endpoint(request: Request, body: QueryRequest) -> QueryResponse:
+    agente_respuesta: AgenteRespuesta = request.app.state.agente_respuesta
+    try:
+        return await agente_respuesta.responder(
+            pregunta=body.pregunta,
+            top_k=settings.rag_top_k,
+            umbral_score=settings.rag_score_threshold,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("query failed: {!r}", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No fue posible procesar la consulta por fallo en servicios externos.",
+        ) from exc
