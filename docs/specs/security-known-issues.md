@@ -92,7 +92,7 @@ dependencia directa ni transitive del proyecto).
 
 | Campo                            | Valor                                                              |
 | -------------------------------- | ------------------------------------------------------------------ |
-| Commit que cierra Fase 1         | `<sha>` (ver `git log --follow docs/specs/security-known-issues.md`) |
+| Commit que cierra Fase 1         | `3d1de8e2609b3bf8287707568761ed5ef19f7db7` (short: `3d1de8e`)       |
 | Fecha y hora del commit          | 2026-05-14 a las 14:26 UTC                                         |
 | Resolución actual de uv          | `urllib3` 2.6.3                                                    |
 | Estado del cooldown              | Activo (vence a las 16:13 UTC del mismo día)                       |
