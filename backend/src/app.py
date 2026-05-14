@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -9,6 +10,10 @@ from pydantic import BaseModel
 from starlette.responses import Response
 
 from src.logger import setup_logging
+from src.services.gemini import GeminiService
+from src.services.make_webhook import MakeWebhookService
+from src.services.qdrant_client import QdrantService
+from src.services.vision import VisionService
 from src.settings import get_settings
 
 VERSION = "0.1.0"
@@ -18,11 +23,35 @@ VERSION = "0.1.0"
 async def lifespan(app: FastAPI):
     setup_logging()
     settings = get_settings()
+
+    app.state.gemini = GeminiService(settings)
+    app.state.qdrant = QdrantService(settings)
+    app.state.vision = VisionService(settings)
+    app.state.make = MakeWebhookService(settings)
+
     logger.bind(version=VERSION, cors_origins=settings.cors_origins).info(
-        "Mentor IA backend iniciado"
+        "Mentor IA backend iniciando"
     )
-    yield
-    logger.info("Mentor IA backend detenido")
+
+    # ensure_collection es idempotente: si la colección ya existe, no-op.
+    # Si Qdrant está caído, lo logueamos pero NO impedimos el arranque para
+    # que /health pueda reflejar el estado real (qdrant_ok=false).
+    try:
+        await app.state.qdrant.ensure_collection()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("qdrant: ensure_collection falló al arranque: {!r}", exc)
+
+    logger.info("Mentor IA backend listo")
+    try:
+        yield
+    finally:
+        await asyncio.gather(
+            app.state.qdrant.close(),
+            app.state.vision.close(),
+            app.state.make.close(),
+            return_exceptions=True,
+        )
+        logger.info("Mentor IA backend detenido")
 
 
 app = FastAPI(
@@ -83,12 +112,21 @@ class HealthResponse(BaseModel):
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    # En Fase 1 devolvemos siempre False. Fase 2 verificará Qdrant y Gemini
-    # con un ping liviano y reflejará el estado real.
+async def health(request: Request) -> HealthResponse:
+    # Verificamos Qdrant y Gemini en paralelo con timeout 2s cada uno.
+    # /health NUNCA falla por dependencias caídas: refleja estado real para
+    # que el frontend pueda mostrar el badge de degradación.
+    qdrant: QdrantService = request.app.state.qdrant
+    gemini: GeminiService = request.app.state.gemini
+
+    qdrant_ok, gemini_ok = await asyncio.gather(
+        qdrant.ping(timeout=2.0),
+        gemini.ping(timeout=2.0),
+    )
+
     return HealthResponse(
         status="ok",
         version=VERSION,
-        qdrant_ok=False,
-        gemini_ok=False,
+        qdrant_ok=qdrant_ok,
+        gemini_ok=gemini_ok,
     )
