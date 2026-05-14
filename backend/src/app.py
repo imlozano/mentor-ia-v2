@@ -1,15 +1,16 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from typing import Literal
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
-from pydantic import BaseModel
 from starlette.responses import Response
 
+from src.agentes.agente_extraccion import AgenteExtraccion
 from src.logger import setup_logging
+from src.models import DocumentosResponse, DocumentoIndexado, HealthResponse, UploadResponse
 from src.services.gemini import GeminiService
 from src.services.make_webhook import MakeWebhookService
 from src.services.qdrant_client import QdrantService
@@ -17,6 +18,10 @@ from src.services.vision import VisionService
 from src.settings import get_settings
 
 VERSION = "0.1.0"
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_PDF_BYTES = 25 * 1024 * 1024
+SUPPORTED_UPLOAD_EXTENSIONS = {".pdf", ".txt", ".md", ".png", ".jpg", ".jpeg"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
 
 @asynccontextmanager
@@ -28,6 +33,12 @@ async def lifespan(app: FastAPI):
     app.state.qdrant = QdrantService(settings)
     app.state.vision = VisionService(settings)
     app.state.make = MakeWebhookService(settings)
+    app.state.agente_extraccion = AgenteExtraccion(
+        qdrant_client=app.state.qdrant,
+        gemini_service=app.state.gemini,
+        vision_service=app.state.vision,
+        settings=settings,
+    )
 
     logger.bind(version=VERSION, cors_origins=settings.cors_origins).info(
         "Mentor IA backend iniciando"
@@ -104,13 +115,6 @@ async def request_id_middleware(request: Request, call_next):
         return response
 
 
-class HealthResponse(BaseModel):
-    status: Literal["ok"]
-    version: str
-    qdrant_ok: bool
-    gemini_ok: bool
-
-
 @app.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
     # Verificamos Qdrant y Gemini en paralelo con timeout 2s cada uno.
@@ -129,4 +133,77 @@ async def health(request: Request) -> HealthResponse:
         version=VERSION,
         qdrant_ok=qdrant_ok,
         gemini_ok=gemini_ok,
+    )
+
+
+@app.post("/upload-document", response_model=UploadResponse)
+async def upload_document(
+    request: Request,
+    file: UploadFile = File(...),
+    x_filename: str | None = Header(default=None),
+) -> UploadResponse:
+    from src.utils.safe_filename import safe_filename
+
+    suggested_name = x_filename or file.filename or "archivo_sin_nombre"
+    safe_name = safe_filename(suggested_name)
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in SUPPORTED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Extensión no soportada: {suffix}")
+
+    content = await file.read()
+    if suffix in IMAGE_EXTENSIONS and len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Imagen supera tamaño máximo de 10 MB")
+    if suffix == ".pdf" and len(content) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=400, detail="PDF supera tamaño máximo de 25 MB")
+
+    docs_dir = settings.base_docs_dir
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    target_path = docs_dir / safe_name
+    target_path.write_bytes(content)
+
+    agente_extraccion: AgenteExtraccion = request.app.state.agente_extraccion
+    chunks_ingresados = await agente_extraccion.ingestar_documento(target_path)
+
+    return UploadResponse(status="ok", archivo=safe_name, chunks_ingresados=chunks_ingresados)
+
+
+@app.get("/documentos-indexados", response_model=DocumentosResponse)
+async def documentos_indexados(request: Request) -> DocumentosResponse:
+    qdrant: QdrantService = request.app.state.qdrant
+    grouped: dict[str, dict[str, int | str]] = {}
+    total_chunks = 0
+
+    async for record in qdrant.scroll_all():
+        payload = record.payload or {}
+        source_path = str(payload.get("source_path") or "")
+        if not source_path:
+            continue
+
+        entry = grouped.setdefault(
+            source_path,
+            {
+                "nombre_archivo": str(payload.get("nombre_archivo") or Path(source_path).name),
+                "source_path": source_path,
+                "tipo_fuente": str(payload.get("tipo_fuente") or "txt"),
+                "total_chunks": 0,
+            },
+        )
+        entry["total_chunks"] = int(entry["total_chunks"]) + 1
+        total_chunks += 1
+
+    documentos = [
+        DocumentoIndexado(
+            nombre_archivo=str(item["nombre_archivo"]),
+            source_path=str(item["source_path"]),
+            tipo_fuente=str(item["tipo_fuente"]),
+            total_chunks=int(item["total_chunks"]),
+        )
+        for item in grouped.values()
+    ]
+    documentos.sort(key=lambda doc: doc.nombre_archivo.lower())
+
+    return DocumentosResponse(
+        documentos=documentos,
+        total_chunks=total_chunks,
+        total_documentos=len(documentos),
     )
