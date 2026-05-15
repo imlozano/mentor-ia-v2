@@ -3,9 +3,30 @@
 import { useEffect, useState } from "react";
 
 import { getHealth } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 type HealthState = "checking" | "online" | "partial" | "offline";
+
+const LABELS: Record<HealthState, string> = {
+  checking: "Verificando",
+  online: "Online",
+  partial: "Parcial",
+  offline: "Offline",
+};
+
+const DOT_COLORS: Record<HealthState, string> = {
+  checking: "bg-muted-foreground",
+  online: "bg-emerald-500",
+  partial: "bg-amber-500",
+  offline: "bg-destructive",
+};
+
+const PING_COLORS: Record<HealthState, string> = {
+  checking: "bg-muted-foreground/50",
+  online: "bg-emerald-400",
+  partial: "bg-amber-400",
+  offline: "bg-destructive/60",
+};
 
 export function StatusIndicator() {
   const [state, setState] = useState<HealthState>("checking");
@@ -17,8 +38,7 @@ export function StatusIndicator() {
       try {
         const health = await getHealth();
         if (!mounted) return;
-        if (health.qdrant_ok && health.gemini_ok) setState("online");
-        else setState("partial");
+        setState(health.qdrant_ok && health.gemini_ok ? "online" : "partial");
       } catch {
         if (!mounted) return;
         setState("offline");
@@ -33,9 +53,27 @@ export function StatusIndicator() {
     };
   }, []);
 
-  if (state === "checking") return <Badge variant="secondary">Verificando...</Badge>;
-  if (state === "online") return <Badge className="bg-green-600 hover:bg-green-600">Online</Badge>;
-  if (state === "partial") return <Badge className="bg-yellow-500 hover:bg-yellow-500">Parcial</Badge>;
-  return <Badge variant="destructive">Offline</Badge>;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="relative flex h-2 w-2">
+        {state !== "checking" ? (
+          <span
+            className={cn(
+              "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
+              PING_COLORS[state],
+            )}
+          />
+        ) : null}
+        <span
+          className={cn(
+            "relative inline-flex h-2 w-2 rounded-full",
+            DOT_COLORS[state],
+          )}
+        />
+      </span>
+      <span className="text-xs font-medium text-muted-foreground">
+        {LABELS[state]}
+      </span>
+    </div>
+  );
 }
-
