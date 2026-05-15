@@ -1,9 +1,13 @@
-"""Wrapper del SDK google-genai para Mentor IA.
+"""Wrapper del SDK google-genai para Mentor IA — solo embeddings.
 
-Provee tres operaciones:
+Provee dos operaciones:
 - embed_query / embed_texts: vectores de 768 dim renormalizados a norma 1.
-- generate: respuesta de texto del LLM.
 - ping: verificación liviana para /health.
+
+El LLM de chat/plan y el OCR multimodal se migraron a OpenAI gpt-4o-mini
+(ver CLAUDE.md §2.5). Aquí solo queda el path de embeddings, que sigue en
+Gemini porque la cuota RPD del tier gratuito (1000) es suficiente para el
+alcance académico.
 
 Sobre la renormalización: `gemini-embedding-001` con `outputDimensionality=768`
 trunca un vector original de 3072 dimensiones aplicando Matryoshka
@@ -54,40 +58,6 @@ class GeminiService:
         )
 
         return [self._normalize(list(e.values)) for e in response.embeddings]
-
-    # ----- Generación de texto -----
-
-    async def generate(self, prompt: str, system: str | None = None) -> str:
-        config = gtypes.GenerateContentConfig(system_instruction=system) if system else None
-        attempts = 3
-        last_exc: Exception | None = None
-        for attempt in range(1, attempts + 1):
-            try:
-                response = await asyncio.to_thread(
-                    self._client.models.generate_content,
-                    model=self._settings.llm_model,
-                    contents=prompt,
-                    config=config,
-                )
-                text = response.text or ""
-                return text.strip()
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-                msg = str(exc)
-                if "UNAVAILABLE" in msg and attempt < attempts:
-                    wait_s = attempt * 2
-                    logger.warning(
-                        "gemini generate transient UNAVAILABLE; reintento {}/{} en {}s",
-                        attempt,
-                        attempts,
-                        wait_s,
-                    )
-                    await asyncio.sleep(wait_s)
-                    continue
-                raise
-
-        assert last_exc is not None
-        raise last_exc
 
     # ----- Health -----
 

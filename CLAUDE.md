@@ -46,8 +46,8 @@ usuario las contradice, el agente debe preguntar antes de proceder.
 | Backend         | FastAPI + Python 3.11+                                  |
 | Base vectorial  | Qdrant Cloud, colección `mentor_ia_aprendizaje`, 768 dim, COSINE |
 | Embeddings      | Google Gemini `gemini-embedding-001` con `outputDimensionality=768` (MRL, vectores renormalizados) |
-| LLM             | Google Gemini `gemini-flash-latest` (migración a OpenAI `gpt-4o-mini` pendiente; ver §2.5) |
-| OCR             | Gemini multimodal (`gemini-flash-latest`) — migración a OpenAI `gpt-4o-mini` Vision pendiente (ver §2.5) |
+| LLM             | OpenAI `gpt-4o-mini` (chat completions). Decisión documentada en §2.5. |
+| OCR             | OpenAI `gpt-4o-mini` (Vision multimodal sobre chat completions). Decisión documentada en §2.5. |
 | Email           | Make.com Custom Webhook + Gmail Sender                  |
 | PDF             | `pypdf` 6.x (NO PyPDF2, que está deprecated)            |
 
@@ -66,26 +66,38 @@ explícitamente**. Estas decisiones están justificadas en
 [`docs/academic/Documento_Tecnico.md`](./docs/academic/Documento_Tecnico.md),
 sección 6.
 
-### 2.5 Migración LLM y OCR a OpenAI (decidida 2026-05-15, pendiente de aplicar)
+### 2.5 Migración LLM y OCR a OpenAI (aplicada 2026-05-15)
 
-Por restricción de cuota del tier gratuito de Gemini 3 Flash
-(20 requests/día por modelo), se migra todo el uso de LLM y OCR
-multimodal a OpenAI `gpt-4o-mini`. Embeddings siguen en Gemini
-(`gemini-embedding-001`, cuota RPD 1000 suficiente).
+Motivación: el tier gratuito de Gemini 3 Flash quedó en 20 requests/día
+por modelo (cuota agotada durante las pruebas E2E pre-despliegue del
+2026-05-15). El fallback local del agente de plan-repaso generaba
+descripciones genéricas inservibles para defensa académica.
 
-Alcance de la migración (en sesión separada, antes de Fase 12):
+Decisión: migrar todo el uso de LLM y OCR multimodal a
+OpenAI `gpt-4o-mini`. Embeddings permanecen en Gemini
+(`gemini-embedding-001`, cuota RPD 1000 suficiente y modelo ya
+calibrado en 768d MRL para Qdrant COSINE).
 
-- `AgenteRespuesta` (chat RAG): `GeminiService.generate` → OpenAI Chat Completions.
-- `AgentePlanRepaso` (descripciones de sesión): igual.
-- `GeminiVisionService` → `OpenAIVisionService` con `gpt-4o-mini` (input multimodal).
-- Nuevo `OPENAI_API_KEY` en `.env` y `Settings`.
-- Dependencia `openai` en `pyproject.toml`.
-- Mantener `GeminiService.embed_query/embed_texts` y `GeminiService.ping`.
+Aplicado en commit `<pendiente>` (sesión 2026-05-15):
 
-Justificación a defender en sustentación: tier gratuito de Gemini
-agotaba la demo durante pruebas continuas; OpenAI con créditos del
-usuario garantiza disponibilidad. Embeddings se mantienen en Gemini
-porque el modelo de 768d MRL ya está calibrado para Qdrant.
+- Servicio nuevo `src/services/openai_service.py` con `generate`,
+  `extract_text_from_image`, `extract_text_from_pdf_page`, `ping`,
+  `close`. Reintentos con backoff frente a `RateLimitError`/`APITimeoutError`.
+- `AgenteRespuesta`, `AgentePlanRepaso`, `AgenteExtraccion` inyectan
+  `OpenAIService` y usan sus métodos en lugar de Gemini.
+- `GeminiService` queda solo con `embed_query/embed_texts/ping` (el
+  método `generate` se eliminó).
+- `src/services/gemini_vision.py` eliminado.
+- `Settings` añade `openai_api_key`, `openai_chat_model`,
+  `openai_vision_model` (defaults `gpt-4o-mini`).
+- `/health` ahora pingea Qdrant + Gemini (embeddings) + OpenAI (chat+vision).
+- Dependencia `openai>=1.50,<2.0` en `pyproject.toml`.
+
+Para defender en sustentación: la cuota Gemini-Flash tier gratuito
+era incompatible con un sistema multiagente con varias llamadas LLM
+por petición; gpt-4o-mini con créditos pagados ofrece RPM/TPM
+adecuados y precio bajo (~USD 0.15/1M input tokens). Mantener Gemini
+para embeddings preserva la inversión de ingeniería en MRL/COSINE.
 
 ## 3. Estructura del repositorio
 
@@ -182,14 +194,18 @@ en `.env.example` (que se crea como plantilla) y se leen en código vía
 
 ```
 GEMINI_API_KEY=...
+OPENAI_API_KEY=...
 QDRANT_URL=...
 QDRANT_API_KEY=...
 QDRANT_COLLECTION=mentor_ia_aprendizaje
-GOOGLE_VISION_KEY_JSON_PATH=./credentials/vision.json
 MAKE_WEBHOOK_URL=...
 BASE_DOCS_DIR=./data/ejemplos
 CORS_ORIGINS=http://localhost:3000,https://mentor-ia-sistema.vercel.app
 ```
+
+Nota: `GOOGLE_VISION_KEY_JSON_PATH` y la carpeta `credentials/` quedaron
+obsoletos tras la migración a OpenAI Vision (§2.5). Pueden eliminarse del
+repo y del Droplet.
 
 **Frontend (`frontend/.env.local`):**
 

@@ -21,6 +21,7 @@ class HealthResponse(BaseModel):
     version: str
     qdrant_ok: bool
     gemini_ok: bool
+    openai_ok: bool
 
 
 class Fuente(BaseModel):

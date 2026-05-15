@@ -12,7 +12,7 @@ import pypdfium2 as pdfium
 from qdrant_client.http import models as qmodels
 
 from src.services.gemini import GeminiService
-from src.services.gemini_vision import GeminiVisionService
+from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import Settings
 from src.utils.chunking import chunkear
@@ -28,12 +28,12 @@ class AgenteExtraccion:
         self,
         qdrant_client: QdrantService,
         gemini_service: GeminiService,
-        gemini_vision_service: GeminiVisionService,
+        openai_service: OpenAIService,
         settings: Settings,
     ) -> None:
         self._qdrant = qdrant_client
         self._gemini = gemini_service
-        self._gemini_vision = gemini_vision_service
+        self._openai = openai_service
         self._settings = settings
         self._id_namespace = uuid.NAMESPACE_URL
 
@@ -84,18 +84,18 @@ class AgenteExtraccion:
             )
             if avg_chars_per_page < _PDF_SCANNED_THRESHOLD:
                 logger.warning(
-                    "pdf detectado como escaneado/sin texto suficiente; fallback Gemini multimodal: archivo='{}' promedio={:.2f} (< {})",
+                    "pdf detectado como escaneado/sin texto suficiente; fallback OpenAI Vision: archivo='{}' promedio={:.2f} (< {})",
                     path.name,
                     avg_chars_per_page,
                     _PDF_SCANNED_THRESHOLD,
                 )
-                return await self._ocr_pdf_with_gemini(path)
+                return await self._ocr_pdf_with_openai(path)
             return extraer_texto_pdf(path)
         if suffix in {".txt", ".md"}:
             return path.read_text(encoding="utf-8", errors="ignore")
         if suffix in _IMAGE_SUFFIXES:
             mime = "image/png" if suffix == ".png" else "image/jpeg"
-            return await self._gemini_vision.extract_text_from_image(path.read_bytes(), mime=mime)
+            return await self._openai.extract_text_from_image(path.read_bytes(), mime=mime)
         raise ValueError(f"Extensión no soportada: {suffix}")
 
     def _chunkear(self, texto: str) -> list[str]:
@@ -130,7 +130,7 @@ class AgenteExtraccion:
         await self._qdrant.upsert_points(points)
         return len(points)
 
-    async def _ocr_pdf_with_gemini(self, path: Path) -> str:
+    async def _ocr_pdf_with_openai(self, path: Path) -> str:
         pdf = pdfium.PdfDocument(str(path))
         pages_text: list[str] = []
         try:
@@ -138,11 +138,11 @@ class AgenteExtraccion:
                 page = pdf[idx]
                 bitmap = page.render(scale=2.0)
                 png_bytes = self._bitmap_to_png_bytes(bitmap)
-                extracted = await self._gemini_vision.extract_text_from_pdf_page(png_bytes)
+                extracted = await self._openai.extract_text_from_pdf_page(png_bytes)
                 if extracted.strip():
                     pages_text.append(extracted.strip())
                 logger.debug(
-                    "pdf page OCR con Gemini: archivo='{}' pagina={} chars_out={}",
+                    "pdf page OCR con OpenAI: archivo='{}' pagina={} chars_out={}",
                     path.name,
                     idx + 1,
                     len(extracted),

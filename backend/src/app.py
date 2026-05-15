@@ -25,8 +25,8 @@ from src.models import (
     UploadResponse,
 )
 from src.services.gemini import GeminiService
-from src.services.gemini_vision import GeminiVisionService
 from src.services.make_webhook import MakeWebhookService
+from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import get_settings
 
@@ -43,22 +43,24 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     app.state.gemini = GeminiService(settings)
-    app.state.gemini_vision = GeminiVisionService(settings)
+    app.state.openai = OpenAIService(settings)
     app.state.qdrant = QdrantService(settings)
     app.state.make = MakeWebhookService(settings)
     app.state.agente_extraccion = AgenteExtraccion(
         qdrant_client=app.state.qdrant,
         gemini_service=app.state.gemini,
-        gemini_vision_service=app.state.gemini_vision,
+        openai_service=app.state.openai,
         settings=settings,
     )
     app.state.agente_respuesta = AgenteRespuesta(
         qdrant_client=app.state.qdrant,
         gemini_service=app.state.gemini,
+        openai_service=app.state.openai,
     )
     app.state.agente_plan_repaso = AgentePlanRepaso(
         qdrant_client=app.state.qdrant,
         gemini_service=app.state.gemini,
+        openai_service=app.state.openai,
         agente_extraccion=app.state.agente_extraccion,
         make_webhook=app.state.make,
     )
@@ -82,6 +84,7 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(
             app.state.qdrant.close(),
             app.state.make.close(),
+            app.state.openai.close(),
             return_exceptions=True,
         )
         logger.info("Mentor IA backend detenido")
@@ -139,15 +142,17 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
-    # Verificamos Qdrant y Gemini en paralelo con timeout 2s cada uno.
-    # /health NUNCA falla por dependencias caídas: refleja estado real para
-    # que el frontend pueda mostrar el badge de degradación.
+    # Verificamos Qdrant, Gemini (embeddings) y OpenAI (chat+vision) en
+    # paralelo con timeout 2s cada uno. /health NUNCA falla por dependencias
+    # caídas: refleja estado real para que el frontend muestre degradación.
     qdrant: QdrantService = request.app.state.qdrant
     gemini: GeminiService = request.app.state.gemini
+    openai: OpenAIService = request.app.state.openai
 
-    qdrant_ok, gemini_ok = await asyncio.gather(
+    qdrant_ok, gemini_ok, openai_ok = await asyncio.gather(
         qdrant.ping(timeout=2.0),
         gemini.ping(timeout=2.0),
+        openai.ping(timeout=2.0),
     )
 
     return HealthResponse(
@@ -155,6 +160,7 @@ async def health(request: Request) -> HealthResponse:
         version=VERSION,
         qdrant_ok=qdrant_ok,
         gemini_ok=gemini_ok,
+        openai_ok=openai_ok,
     )
 
 
@@ -325,14 +331,14 @@ async def ocr_imagen_endpoint(request: Request, file: UploadFile = File(...)) ->
         raise HTTPException(status_code=400, detail="Imagen supera tamaño máximo de 10 MB")
 
     mime = "image/png" if suffix == ".png" else "image/jpeg"
-    gemini_vision: GeminiVisionService = request.app.state.gemini_vision
+    openai_service: OpenAIService = request.app.state.openai
     try:
-        texto = await gemini_vision.extract_text_from_image(content, mime=mime)
+        texto = await openai_service.extract_text_from_image(content, mime=mime)
     except Exception as exc:  # noqa: BLE001
         logger.error("ocr-imagen failed: {!r}", exc)
         raise HTTPException(
             status_code=503,
-            detail="No fue posible procesar OCR por fallo de Gemini multimodal.",
+            detail="No fue posible procesar OCR por fallo de OpenAI Vision.",
         ) from exc
 
     return OcrResponse(texto=texto, caracteres=len(texto))

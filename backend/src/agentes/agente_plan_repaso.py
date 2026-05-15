@@ -9,6 +9,7 @@ from src.agentes.agente_extraccion import AgenteExtraccion
 from src.models import PlanRepasoResponse, SesionPlan
 from src.services.gemini import GeminiService
 from src.services.make_webhook import MakeWebhookService
+from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 
 _SESSION_DELTAS = [("D+1", 1), ("D+7", 7), ("D+14", 14), ("D+30", 30)]
@@ -19,11 +20,13 @@ class AgentePlanRepaso:
         self,
         qdrant_client: QdrantService,
         gemini_service: GeminiService,
+        openai_service: OpenAIService,
         agente_extraccion: AgenteExtraccion,
         make_webhook: MakeWebhookService,
     ) -> None:
         self._qdrant = qdrant_client
         self._gemini = gemini_service
+        self._openai = openai_service
         self._agente_extraccion = agente_extraccion
         self._make_webhook = make_webhook
 
@@ -103,10 +106,10 @@ class AgentePlanRepaso:
             f"Contexto de apoyo (si existe):\n{contexto[:1500]}"
         )
         try:
-            raw = await self._gemini.generate(prompt=prompt)
+            raw = await self._openai.generate(prompt=prompt)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "plan-repaso: fallback local por error de generación Gemini en {}: {!r}",
+                "plan-repaso: fallback local por error de generación OpenAI en {}: {!r}",
                 tipo,
                 exc,
             )

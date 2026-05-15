@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # --- Servicios externos ---
     gemini_api_key: str
+    openai_api_key: str
     qdrant_url: str
     qdrant_api_key: str
     qdrant_collection: str = "mentor_ia_aprendizaje"
@@ -20,11 +21,14 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # --- Modelos Gemini ---
+    # --- Modelos Gemini (embeddings) ---
     embedding_model: str = "gemini-embedding-001"
     embedding_output_dimensionality: int = 768
-    llm_model: str = "gemini-flash-latest"
     embedding_dim: int = 768
+
+    # --- Modelos OpenAI (LLM + OCR multimodal) ---
+    openai_chat_model: str = "gpt-4o-mini"
+    openai_vision_model: str = "gpt-4o-mini"
 
     # --- Chunking ---
     chunk_max_chars: int = 900

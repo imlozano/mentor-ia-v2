@@ -4,13 +4,20 @@ from loguru import logger
 
 from src.models import Fuente, QueryResponse
 from src.services.gemini import GeminiService
+from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 
 
 class AgenteRespuesta:
-    def __init__(self, qdrant_client: QdrantService, gemini_service: GeminiService) -> None:
+    def __init__(
+        self,
+        qdrant_client: QdrantService,
+        gemini_service: GeminiService,
+        openai_service: OpenAIService,
+    ) -> None:
         self._qdrant = qdrant_client
         self._gemini = gemini_service
+        self._openai = openai_service
 
     async def responder(
         self,
@@ -35,7 +42,7 @@ class AgenteRespuesta:
                 f"Contexto:\n{contexto}\n\n"
                 f"Pregunta:\n{pregunta}\n"
             )
-            respuesta = await self._gemini.generate(prompt=prompt)
+            respuesta = await self._openai.generate(prompt=prompt)
             return QueryResponse(
                 respuesta=respuesta,
                 origen="rag",
@@ -44,7 +51,7 @@ class AgenteRespuesta:
             )
 
         logger.info("query sin fuentes sobre umbral, usando modelo base")
-        respuesta = await self._gemini.generate(
+        respuesta = await self._openai.generate(
             prompt=f"Responde en español de forma precisa y breve:\n\n{pregunta}"
         )
         return QueryResponse(
