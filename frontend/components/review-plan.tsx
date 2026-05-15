@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { createPlan } from "@/lib/api";
+import { formatLocalDate } from "@/lib/utils";
 import type { PlanRepasoResponse } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -271,8 +272,7 @@ export function ReviewPlan() {
                   </h2>
                   <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                     <CalendarIcon className="h-3.5 w-3.5" />
-                    Inicio:{" "}
-                    {new Date(plan.fecha_inicio).toLocaleDateString("es-CO")}
+                    Inicio: {formatLocalDate(plan.fecha_inicio)}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -288,6 +288,15 @@ export function ReviewPlan() {
                       className="self-start rounded-full px-3 py-1 text-xs"
                     >
                       Enviado por email
+                    </Badge>
+                  ) : null}
+                  {typeof plan.chunks_ingresados === "number" &&
+                  plan.chunks_ingresados > 0 ? (
+                    <Badge
+                      variant="outline"
+                      className="self-start rounded-full px-3 py-1 text-xs"
+                    >
+                      {plan.chunks_ingresados} chunks ingresados
                     </Badge>
                   ) : null}
                 </div>

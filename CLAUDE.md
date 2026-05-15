@@ -46,8 +46,8 @@ usuario las contradice, el agente debe preguntar antes de proceder.
 | Backend         | FastAPI + Python 3.11+                                  |
 | Base vectorial  | Qdrant Cloud, colección `mentor_ia_aprendizaje`, 768 dim, COSINE |
 | Embeddings      | Google Gemini `gemini-embedding-001` con `outputDimensionality=768` (MRL, vectores renormalizados) |
-| LLM             | Google Gemini `gemini-flash-latest`                     |
-| OCR             | Google Cloud Vision `DOCUMENT_TEXT_DETECTION`           |
+| LLM             | Google Gemini `gemini-flash-latest` (migración a OpenAI `gpt-4o-mini` pendiente; ver §2.5) |
+| OCR             | Gemini multimodal (`gemini-flash-latest`) — migración a OpenAI `gpt-4o-mini` Vision pendiente (ver §2.5) |
 | Email           | Make.com Custom Webhook + Gmail Sender                  |
 | PDF             | `pypdf` 6.x (NO PyPDF2, que está deprecated)            |
 
@@ -65,6 +65,27 @@ Gemini por otro LLM, o cualquier elemento del stack, debe **preguntar
 explícitamente**. Estas decisiones están justificadas en
 [`docs/academic/Documento_Tecnico.md`](./docs/academic/Documento_Tecnico.md),
 sección 6.
+
+### 2.5 Migración LLM y OCR a OpenAI (decidida 2026-05-15, pendiente de aplicar)
+
+Por restricción de cuota del tier gratuito de Gemini 3 Flash
+(20 requests/día por modelo), se migra todo el uso de LLM y OCR
+multimodal a OpenAI `gpt-4o-mini`. Embeddings siguen en Gemini
+(`gemini-embedding-001`, cuota RPD 1000 suficiente).
+
+Alcance de la migración (en sesión separada, antes de Fase 12):
+
+- `AgenteRespuesta` (chat RAG): `GeminiService.generate` → OpenAI Chat Completions.
+- `AgentePlanRepaso` (descripciones de sesión): igual.
+- `GeminiVisionService` → `OpenAIVisionService` con `gpt-4o-mini` (input multimodal).
+- Nuevo `OPENAI_API_KEY` en `.env` y `Settings`.
+- Dependencia `openai` en `pyproject.toml`.
+- Mantener `GeminiService.embed_query/embed_texts` y `GeminiService.ping`.
+
+Justificación a defender en sustentación: tier gratuito de Gemini
+agotaba la demo durante pruebas continuas; OpenAI con créditos del
+usuario garantiza disponibilidad. Embeddings se mantienen en Gemini
+porque el modelo de 768d MRL ya está calibrado para Qdrant.
 
 ## 3. Estructura del repositorio
 
@@ -115,7 +136,7 @@ mentor-ia-v2/
 - `loguru` para logging (no `print()`).
 - `httpx` para llamadas HTTP externas (no `requests`).
 - Estructura: `src/app.py` (endpoints), `src/agentes/` (3 agentes),
-  `src/services/` (clientes a Gemini, Vision, Make), `src/models.py`
+  `src/services/` (clientes a Gemini, Gemini Vision, Make; futuro OpenAI), `src/models.py`
   (Pydantic schemas).
 - Variables de entorno: leer con `pydantic-settings` desde un `Settings`
   centralizado, NO con `os.environ.get` esparcido.

@@ -34,8 +34,9 @@ class AgentePlanRepaso:
         email: str | None = None,
         archivo: Path | None = None,
     ) -> PlanRepasoResponse:
+        chunks_ingresados: int | None = None
         if archivo is not None:
-            await self._agente_extraccion.ingestar_documento(archivo)
+            chunks_ingresados = await self._agente_extraccion.ingestar_documento(archivo)
 
         contexto = await self._buscar_contexto(tema)
         sesiones = await self._generar_sesiones(tema=tema, fecha_inicio=fecha_inicio, contexto=contexto)
@@ -55,6 +56,7 @@ class AgentePlanRepaso:
             fecha_inicio=fecha_inicio,
             sesiones=sesiones,
             email_enviado=email_enviado,
+            chunks_ingresados=chunks_ingresados,
         )
 
     async def _buscar_contexto(self, tema: str) -> str:

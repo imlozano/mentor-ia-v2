@@ -1,6 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { formatLocalDate } from "@/lib/utils";
 import type { SesionPlan } from "@/lib/types";
 
 export function PlanTimeline({ sessions }: { sessions: SesionPlan[] }) {
@@ -23,7 +24,7 @@ export function PlanTimeline({ sessions }: { sessions: SesionPlan[] }) {
                     {session.tipo}
                   </Badge>
                   <span className="text-xs text-muted-foreground">
-                    {new Date(session.fecha).toLocaleDateString("es-CO", {
+                    {formatLocalDate(session.fecha, {
                       weekday: "long",
                       year: "numeric",
                       month: "long",

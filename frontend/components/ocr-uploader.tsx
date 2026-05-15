@@ -12,10 +12,12 @@ export function OcrUploader() {
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function onPick(file: File) {
     setError(null);
+    setSuccess(null);
     setBusy(true);
     setText("");
     setFileName(file.name);
@@ -42,12 +44,17 @@ export function OcrUploader() {
   async function indexText() {
     if (!text.trim()) return;
     setBusy(true);
+    setError(null);
+    setSuccess(null);
     try {
       const blob = new Blob([text], { type: "text/plain" });
       const txtFile = new File([blob], "ocr-extraido.txt", {
         type: "text/plain",
       });
-      await uploadDocument(txtFile);
+      const res = await uploadDocument(txtFile);
+      setSuccess(
+        `Indexado: ${res.archivo} (${res.chunks_ingresados} chunk${res.chunks_ingresados === 1 ? "" : "s"}).`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "No fue posible indexar el texto.");
     } finally {
@@ -104,6 +111,12 @@ export function OcrUploader() {
         </p>
       ) : null}
 
+      {success ? (
+        <p className="rounded-md bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
+          {success}
+        </p>
+      ) : null}
+
       {text ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -121,7 +134,10 @@ export function OcrUploader() {
           </div>
           <Textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              setSuccess(null);
+            }}
             className="min-h-[160px] rounded-xl border-0 bg-muted/30 text-xs leading-relaxed focus-visible:ring-1 focus-visible:ring-primary/40"
           />
           <Button

@@ -49,6 +49,7 @@ class PlanRepasoResponse(BaseModel):
     fecha_inicio: date
     sesiones: list[SesionPlan]
     email_enviado: bool
+    chunks_ingresados: int | None = None
 
 
 class OcrResponse(BaseModel):

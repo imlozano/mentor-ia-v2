@@ -28,6 +28,7 @@ export interface PlanRepasoResponse {
   fecha_inicio: string;
   sesiones: SesionPlan[];
   email_enviado: boolean;
+  chunks_ingresados?: number | null;
 }
 
 export type TipoFuente = "pdf" | "txt" | "md" | "image";
