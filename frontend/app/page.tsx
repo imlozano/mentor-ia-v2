@@ -1,6 +1,7 @@
 "use client";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StudyAssistant } from "@/components/study-assistant";
 
 export default function Home() {
   return (
@@ -18,9 +19,7 @@ export default function Home() {
           <TabsTrigger value="plan">Plan de Repaso</TabsTrigger>
         </TabsList>
         <TabsContent value="asistente" className="mt-4">
-          <div className="rounded-lg border p-4 text-sm text-muted-foreground">
-            Contenido de Asistente de Estudio pendiente (Fase 9).
-          </div>
+          <StudyAssistant />
         </TabsContent>
         <TabsContent value="plan" className="mt-4">
           <div className="rounded-lg border p-4 text-sm text-muted-foreground">
