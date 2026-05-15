@@ -33,6 +33,7 @@ node_modules/
 out/
 build/
 dist/
+.pnpm-store/
 
 # ---- IDE ----
 .vscode/

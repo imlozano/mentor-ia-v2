@@ -2,6 +2,8 @@ minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@types/*"
 blockExoticSubdeps: true
+overrides:
+  postcss@<8.5.10: ">=8.5.10"
 ignoredBuiltDependencies:
   - msw
   - sharp
