@@ -63,3 +63,7 @@ tmp/
 # ---- Handoff local (backup personal del usuario, no committeado) ----
 docs/specs/handoff-state.md
 handoff-progress.md
+
+
+#------
+minimalist-website-redesign/*
