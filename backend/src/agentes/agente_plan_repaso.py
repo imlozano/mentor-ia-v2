@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
+from loguru import logger
+
 from src.agentes.agente_extraccion import AgenteExtraccion
 from src.models import PlanRepasoResponse, SesionPlan
 from src.services.gemini import GeminiService
@@ -98,7 +100,19 @@ class AgentePlanRepaso:
             "Devuelve solo 3 líneas, una actividad por línea, sin numeración.\n"
             f"Contexto de apoyo (si existe):\n{contexto[:1500]}"
         )
-        raw = await self._gemini.generate(prompt=prompt)
+        try:
+            raw = await self._gemini.generate(prompt=prompt)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "plan-repaso: fallback local por error de generación Gemini en {}: {!r}",
+                tipo,
+                exc,
+            )
+            return [
+                f"Repasar conceptos clave de {tema} enfocados en {tipo}.",
+                f"Resolver un ejercicio corto relacionado con {tema}.",
+                f"Escribir un resumen de 5 ideas esenciales del tema.",
+            ]
         lines = [line.strip("- ").strip() for line in raw.splitlines() if line.strip()]
         if len(lines) >= 3:
             return lines[:3]

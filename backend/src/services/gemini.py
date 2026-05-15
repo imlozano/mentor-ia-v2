@@ -59,16 +59,35 @@ class GeminiService:
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
         config = gtypes.GenerateContentConfig(system_instruction=system) if system else None
+        attempts = 3
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await asyncio.to_thread(
+                    self._client.models.generate_content,
+                    model=self._settings.llm_model,
+                    contents=prompt,
+                    config=config,
+                )
+                text = response.text or ""
+                return text.strip()
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                msg = str(exc)
+                if "UNAVAILABLE" in msg and attempt < attempts:
+                    wait_s = attempt * 2
+                    logger.warning(
+                        "gemini generate transient UNAVAILABLE; reintento {}/{} en {}s",
+                        attempt,
+                        attempts,
+                        wait_s,
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+                raise
 
-        response = await asyncio.to_thread(
-            self._client.models.generate_content,
-            model=self._settings.llm_model,
-            contents=prompt,
-            config=config,
-        )
-
-        text = response.text or ""
-        return text.strip()
+        assert last_exc is not None
+        raise last_exc
 
     # ----- Health -----
 
