@@ -13,15 +13,15 @@ from pathlib import Path
 from pypdf import PdfReader
 
 
-def extraer_texto_pdf(path: Path | str) -> str:
+def extraer_texto_pdf_por_paginas(path: Path | str) -> list[str]:
     p = Path(path)
     reader = PdfReader(str(p))
-    parts: list[str] = []
-    for page in reader.pages:
-        text = (page.extract_text() or "").strip()
-        if text:
-            parts.append(text)
-    return "\n\n".join(parts)
+    return [(page.extract_text() or "").strip() for page in reader.pages]
+
+
+def extraer_texto_pdf(path: Path | str) -> str:
+    pages = extraer_texto_pdf_por_paginas(path)
+    return "\n\n".join([text for text in pages if text])
 
 
 if __name__ == "__main__":

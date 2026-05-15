@@ -17,6 +17,7 @@ from src.models import (
     DocumentosResponse,
     DocumentoIndexado,
     HealthResponse,
+    OcrResponse,
     PlanRepasoRequest,
     PlanRepasoResponse,
     QueryRequest,
@@ -24,9 +25,9 @@ from src.models import (
     UploadResponse,
 )
 from src.services.gemini import GeminiService
+from src.services.gemini_vision import GeminiVisionService
 from src.services.make_webhook import MakeWebhookService
 from src.services.qdrant_client import QdrantService
-from src.services.vision import VisionService
 from src.settings import get_settings
 
 VERSION = "0.1.0"
@@ -42,13 +43,13 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     app.state.gemini = GeminiService(settings)
+    app.state.gemini_vision = GeminiVisionService(settings)
     app.state.qdrant = QdrantService(settings)
-    app.state.vision = VisionService(settings)
     app.state.make = MakeWebhookService(settings)
     app.state.agente_extraccion = AgenteExtraccion(
         qdrant_client=app.state.qdrant,
         gemini_service=app.state.gemini,
-        vision_service=app.state.vision,
+        gemini_vision_service=app.state.gemini_vision,
         settings=settings,
     )
     app.state.agente_respuesta = AgenteRespuesta(
@@ -80,7 +81,6 @@ async def lifespan(app: FastAPI):
     finally:
         await asyncio.gather(
             app.state.qdrant.close(),
-            app.state.vision.close(),
             app.state.make.close(),
             return_exceptions=True,
         )
@@ -311,3 +311,28 @@ async def plan_repaso_endpoint(
             status_code=503,
             detail="No fue posible generar el plan por fallo en servicios externos.",
         ) from exc
+
+
+@app.post("/ocr-imagen", response_model=OcrResponse)
+async def ocr_imagen_endpoint(request: Request, file: UploadFile = File(...)) -> OcrResponse:
+    filename = file.filename or "imagen"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Solo se admiten imágenes PNG/JPG/JPEG.")
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Imagen supera tamaño máximo de 10 MB")
+
+    mime = "image/png" if suffix == ".png" else "image/jpeg"
+    gemini_vision: GeminiVisionService = request.app.state.gemini_vision
+    try:
+        texto = await gemini_vision.extract_text_from_image(content, mime=mime)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("ocr-imagen failed: {!r}", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No fue posible procesar OCR por fallo de Gemini multimodal.",
+        ) from exc
+
+    return OcrResponse(texto=texto, caracteres=len(texto))

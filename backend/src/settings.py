@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     qdrant_url: str
     qdrant_api_key: str
     qdrant_collection: str = "mentor_ia_aprendizaje"
-    google_vision_key_json_path: Path = Path("./credentials/vision.json")
     make_webhook_url: str | None = None
 
     # --- Storage local ---

@@ -14,8 +14,8 @@
 
 API REST con FastAPI que orquesta tres agentes (`AgenteExtraccion`,
 `AgenteRespuesta`, `AgentePlanRepaso`) sobre una base vectorial Qdrant,
-integra Google Gemini para LLM y embeddings, Google Cloud Vision para
-OCR y Make.com para envío de correos.
+integra Google Gemini para LLM/embeddings y OCR multimodal, y Make.com
+para envío de correos.
 
 Despliegue local con `docker compose up`. Despliegue producción en un
 DigitalOcean Droplet con el mismo `docker-compose.yml`.
@@ -47,7 +47,7 @@ backend/
     ├── services/
     │   ├── __init__.py
     │   ├── gemini.py               Wrapper de Google Gemini (LLM + embeddings)
-    │   ├── vision.py               Wrapper de Google Cloud Vision
+    │   ├── gemini_vision.py        OCR multimodal con Gemini Flash
     │   ├── qdrant_client.py        Conexión a Qdrant Cloud + helpers
     │   └── make_webhook.py         Cliente del webhook de Make.com
     ├── utils/
@@ -72,9 +72,9 @@ pydantic-settings
 python-multipart                  # uploads
 httpx                             # cliente HTTP async
 pypdf>=6.0
+pypdfium2                         # render PDF->imagen para OCR multimodal
 qdrant-client
 google-genai                      # SDK oficial de Gemini
-google-cloud-vision               # cliente Vision
 loguru
 python-dotenv                     # solo en dev
 ```
@@ -186,7 +186,7 @@ class UploadResponse(BaseModel):
 | POST   | `/upload-document`         | `multipart/form-data`<br>header `X-Filename` | `UploadResponse` | Guarda y re-ingesta |
 | POST   | `/query`                   | `QueryRequest`              | `QueryResponse`         |       |
 | POST   | `/plan-repaso`             | `PlanRepasoRequest` o multipart con archivo + tema | `PlanRepasoResponse` |       |
-| POST   | `/ocr-imagen`              | `multipart/form-data` (campo `file`) | `OcrResponse` | Solo OCR, no indexa |
+| POST   | `/ocr-imagen`              | `multipart/form-data` (campo `file`) | `OcrResponse` | OCR con Gemini multimodal, no indexa |
 | POST   | `/ingestar`                | —                           | `{ total_chunks: int }` | Re-indexa toda la carpeta `data/ejemplos` |
 
 ### 5.1 Detalles por endpoint
@@ -224,6 +224,8 @@ class UploadResponse(BaseModel):
 
 **`POST /ocr-imagen`:**
 
+- Extrae texto con Gemini multimodal (`gemini-flash-latest`) a partir de
+  imágenes PNG/JPG/JPEG.
 - Solo extrae texto, NO indexa.
 - Si el frontend luego quiere indexar el texto extraído (botón
   "Indexar documento"), llamará a `/upload-document` con un `.txt`
@@ -345,12 +347,15 @@ Modelos:
   con norma ≠ 1 (medido empíricamente: ≈ 0.57), lo que degrada la métrica
   COSINE en Qdrant.
 
-### 7.2 `services/vision.py`
+### 7.2 `services/gemini_vision.py`
 
 ```python
-class VisionService:
-    async def ocr(self, image_bytes: bytes, mime: str) -> str:
-        """DOCUMENT_TEXT_DETECTION. Devuelve fullTextAnnotation.text."""
+class GeminiVisionService:
+    async def extract_text_from_image(self, image_bytes: bytes, mime: str) -> str:
+        """Extrae texto OCR de imágenes con gemini-flash-latest."""
+
+    async def extract_text_from_pdf_page(self, image_bytes: bytes) -> str:
+        """Extrae texto OCR de una página PDF renderizada como PNG."""
 ```
 
 ### 7.3 `services/qdrant_client.py`
@@ -379,6 +384,16 @@ class MakeWebhookService:
         """POST al webhook. True si 2xx."""
 ```
 
+### 7.5 Justificación de la decisión (Vision → Gemini multimodal)
+
+Se migra de Google Cloud Vision a Gemini multimodal porque Vision exige
+billing habilitado en GCP y ese prerequisito queda fuera del alcance
+operativo del prototipo académico. `gemini-flash-latest` acepta imágenes
+de forma nativa, por lo que permite mantener OCR para `.png/.jpg/.jpeg`
+y habilitar fallback para PDFs escaneados renderizando páginas con
+`pypdfium2`. En documentos con tipografía estándar, el rendimiento de
+extracción es comparable al flujo previo basado en Vision.
+
 ## 8. Configuración (`settings.py`)
 
 Usar `pydantic-settings` para centralizar todas las variables:
@@ -389,7 +404,6 @@ class Settings(BaseSettings):
     qdrant_url: str
     qdrant_api_key: str
     qdrant_collection: str = "mentor_ia_aprendizaje"
-    google_vision_key_json_path: Path
     make_webhook_url: str | None = None
     base_docs_dir: Path = Path("./data/ejemplos")
     cors_origins: list[str] = ["http://localhost:3000"]
@@ -438,7 +452,7 @@ Cada endpoint debe distinguir tres tipos de error:
 | 400    | Input inválido (extensión, tamaño, formato)    |
 | 404    | Recurso no encontrado                          |
 | 422    | Pydantic validation error (automático)         |
-| 503    | Servicio externo caído (Qdrant, Gemini, Vision, Make) |
+| 503    | Servicio externo caído (Qdrant, Gemini, Make) |
 | 500    | Errores no esperados (excepción no manejada)   |
 
 Cada respuesta de error tiene este formato:
