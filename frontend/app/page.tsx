@@ -2,6 +2,7 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StudyAssistant } from "@/components/study-assistant";
+import { ReviewPlan } from "@/components/review-plan";
 
 export default function Home() {
   return (
@@ -22,9 +23,7 @@ export default function Home() {
           <StudyAssistant />
         </TabsContent>
         <TabsContent value="plan" className="mt-4">
-          <div className="rounded-lg border p-4 text-sm text-muted-foreground">
-            Contenido de Plan de Repaso pendiente (Fase 10).
-          </div>
+          <ReviewPlan />
         </TabsContent>
       </Tabs>
     </main>
