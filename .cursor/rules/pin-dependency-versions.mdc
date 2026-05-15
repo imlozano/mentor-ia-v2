@@ -1,0 +1,72 @@
+---
+description: Fija siempre versiones exactas en manifests de dependencias (sin rangos)
+alwaysApply: true
+---
+
+# Versiones de dependencias fijadas (sin rangos)
+
+Regla inmutable para este repositorio (frontend y backend).
+
+## Regla
+
+- NUNCA usar prefijos de rango (`^`, `~`, `>=`, `*`, `latest`, `x`) en archivos
+  de manifest de dependencias. Las versiones deben quedar **fijadas exactas**.
+- Aplica a:
+  - `frontend/package.json` (`dependencies`, `devDependencies`,
+    `peerDependencies`, `optionalDependencies`).
+  - `backend/pyproject.toml` (`[project] dependencies`, `tool.uv.sources`,
+    grupos `dev`, etc.). Usar `==X.Y.Z`, no `>=X.Y`.
+  - Cualquier archivo análogo (`requirements*.txt`, `Pipfile`, etc.) si
+    llega a existir.
+
+## Por qué
+
+1. **Reproducibilidad académica.** El proyecto se sustenta sobre un
+   prototipo defendible. Un build hoy debe ser idéntico al de la
+   sustentación final (2026-05-20).
+2. **Defensa de cadena de suministro.** Junto con
+   `minimumReleaseAge: 1440` en
+   [`frontend/pnpm-workspace.yaml`](../../frontend/pnpm-workspace.yaml) y el
+   `exclude-newer = "7 days"` de uv en el backend, fijar versiones cierra
+   la última ventana por donde una versión maliciosa publicada después del
+   lock podría colarse al resolver el rango.
+3. **Trazabilidad de CVEs.** Las entradas en
+   [`docs/specs/security-known-issues.md`](../../docs/specs/security-known-issues.md)
+   se documentan por versión concreta. Un rango invalida el análisis.
+
+## Cómo actualizar una dependencia
+
+Frontend:
+
+1. `pnpm add <paquete>@<version>` (siempre con la versión explícita).
+2. Verificar que en `package.json` quedó la versión **sin** `^` ni `~`.
+3. Commit con `pnpm-lock.yaml` actualizado.
+
+Backend:
+
+1. `uv add <paquete>==<version>`.
+2. Verificar `pyproject.toml`: la entrada debe tener `==X.Y.Z`.
+3. Commit con `uv.lock` actualizado.
+
+## Cómo migrar entradas existentes
+
+Si encuentras una entrada con rango, **bloquéala** a la versión que el
+lockfile (`pnpm-lock.yaml` o `uv.lock`) ya resuelve, y commitea el cambio
+junto con el lock (que no debería moverse).
+
+## Verificación rápida
+
+Antes de commitear cambios en manifests, ejecuta una búsqueda manual:
+
+```bash
+# Frontend
+rg '"\^|"~|">=' frontend/package.json && echo "FAIL: rangos detectados" || echo "OK"
+
+# Backend
+rg '>=|\^|~=' backend/pyproject.toml && echo "FAIL: rangos detectados" || echo "OK"
+```
+
+Las únicas excepciones legítimas son construcciones del propio formato
+(p. ej. claves como `"engines"` de Node, donde el rango describe la
+plataforma soportada, no una resolución), y se documentan caso por caso
+en el commit que las introduce.
