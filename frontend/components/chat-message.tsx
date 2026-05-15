@@ -9,7 +9,7 @@ export function ChatMessageItem({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+        <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground shadow-sm">
           {message.content}
         </div>
       </div>
@@ -18,22 +18,29 @@ export function ChatMessageItem({ message }: { message: ChatMessage }) {
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm">
+      <div className="max-w-[80%] rounded-2xl bg-muted/60 px-4 py-3 text-sm leading-relaxed">
         <div className="mb-2">
           {message.origen === "rag" ? (
-            <Badge variant="secondary">RAG · {message.sources.length} fuentes</Badge>
+            <Badge variant="secondary" className="rounded-full text-[10px]">
+              RAG · {message.sources.length} fuentes
+            </Badge>
           ) : (
-            <Badge variant="secondary">Conocimiento general</Badge>
+            <Badge variant="outline" className="rounded-full text-[10px]">
+              Conocimiento general
+            </Badge>
           )}
         </div>
         <p className="whitespace-pre-wrap">{message.content}</p>
         {message.origen === "rag" && message.sources.length > 0 ? (
-          <details className="mt-2 text-xs text-muted-foreground">
-            <summary>Ver fuentes</summary>
-            <ul className="mt-1 space-y-1">
+          <details className="mt-3 text-xs text-muted-foreground">
+            <summary className="cursor-pointer hover:text-foreground">
+              Ver fuentes
+            </summary>
+            <ul className="mt-2 space-y-1 font-mono text-[11px]">
               {message.sources.map((s, idx) => (
                 <li key={`${s.archivo}-${s.chunk_index}-${idx}`}>
-                  {s.archivo} · chunk {s.chunk_index}
+                  {s.archivo} · chunk {s.chunk_index} · score{" "}
+                  {s.score.toFixed(3)}
                 </li>
               ))}
             </ul>
@@ -43,4 +50,3 @@ export function ChatMessageItem({ message }: { message: ChatMessage }) {
     </div>
   );
 }
-

@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, FileText, Sparkles, Trash2, Upload } from "lucide-react";
 
 import { askQuery, getIndexedDocuments, uploadDocument } from "@/lib/api";
 import type { DocumentoIndexado, Fuente, Origen } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMessageItem } from "@/components/chat-message";
 import { DocumentsList } from "@/components/documents-list";
@@ -20,16 +20,43 @@ type ChatMsg =
 
 const EXAMPLE_QUERIES = [
   "¿Cuál es la historia de C y C++?",
-  "Técnicas de prompt engineering",
-  "Atajos básicos de terminal Linux",
+  "Técnicas principales de prompt engineering",
+  "Atajos básicos de la terminal Linux",
 ];
 
 export function StudyAssistant() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [docs, setDocs] = useState<DocumentoIndexado[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [leftTab, setLeftTab] = useState<"contexto" | "documentos" | "ocr">("contexto");
+  const [leftTab, setLeftTab] = useState<"contexto" | "documentos" | "ocr">(
+    "contexto",
+  );
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void refreshDocs();
+  }, []);
+
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const viewport = scrollRef.current.querySelector(
+      "[data-radix-scroll-area-viewport]",
+    );
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  }, [messages, loading]);
+
+  async function refreshDocs() {
+    try {
+      const res = await getIndexedDocuments();
+      setDocs(res.documentos);
+    } catch {
+      // silencioso: el StatusIndicator ya muestra estado del backend
+    }
+  }
 
   async function sendQuestion(text: string) {
     setError(null);
@@ -39,10 +66,17 @@ export function StudyAssistant() {
       const res = await askQuery(text);
       setMessages((prev) => [
         ...prev,
-        { role: "agent", content: res.respuesta, sources: res.fuentes, origen: res.origen },
+        {
+          role: "agent",
+          content: res.respuesta,
+          sources: res.fuentes,
+          origen: res.origen,
+        },
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No fue posible consultar al backend.");
+      setError(
+        err instanceof Error ? err.message : "No fue posible consultar al backend.",
+      );
     } finally {
       setLoading(false);
     }
@@ -50,99 +84,214 @@ export function StudyAssistant() {
 
   async function onFileUpload(file: File) {
     setError(null);
-    setLoading(true);
+    setUploading(true);
     try {
       await uploadDocument(file);
       await refreshDocs();
       setMessages((prev) => [
         ...prev,
-        { role: "agent", content: `Documento ${file.name} indexado correctamente.`, sources: [], origen: "modelo" },
+        {
+          role: "agent",
+          content: `Documento ${file.name} indexado correctamente.`,
+          sources: [],
+          origen: "modelo",
+        },
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No fue posible subir el documento.");
+      setError(
+        err instanceof Error ? err.message : "No fue posible subir el documento.",
+      );
     } finally {
-      setLoading(false);
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
-  async function refreshDocs() {
-    const res = await getIndexedDocuments();
-    setDocs(res.documentos);
-  }
-
-  const messageView = useMemo(
-    () =>
-      messages.length ? (
-        messages.map((msg, idx) => <ChatMessageItem key={idx} message={msg} />)
-      ) : (
-        <EmptyState title="Empieza una conversación" subtitle="Haz una pregunta sobre tus documentos indexados." />
-      ),
-    [messages],
-  );
+  const messageView = useMemo(() => {
+    if (messages.length === 0) {
+      return (
+        <EmptyState
+          title="¿En qué puedo ayudarte hoy?"
+          subtitle="Sube un documento o haz una pregunta para comenzar."
+        />
+      );
+    }
+    return (
+      <div className="space-y-5">
+        {messages.map((msg, idx) => (
+          <ChatMessageItem key={idx} message={msg} />
+        ))}
+        {loading ? (
+          <div className="flex justify-start">
+            <div className="rounded-2xl bg-muted/60 px-4 py-3">
+              <div className="flex gap-1.5">
+                <span className="h-2 w-2 animate-bounce rounded-full bg-primary/40 [animation-delay:-0.3s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-primary/40 [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-primary/40" />
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }, [messages, loading]);
 
   return (
-    <div className="grid gap-4 md:grid-cols-[320px_1fr]">
-      <div className="space-y-3 rounded-lg border p-3">
-        <Tabs value={leftTab} onValueChange={(v) => setLeftTab(v as "contexto" | "documentos" | "ocr")}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="contexto">Contexto</TabsTrigger>
-            <TabsTrigger value="documentos">Documentos</TabsTrigger>
-            <TabsTrigger value="ocr">OCR</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="contexto" className="space-y-3">
-            <label className="block">
-              <input
-                type="file"
-                accept=".pdf,.txt,.md,.png,.jpg,.jpeg"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void onFileUpload(file);
-                }}
-              />
-              <Button className="w-full" type="button">
-                <Upload className="mr-1 size-4" />
-                + Subir documento
-              </Button>
-            </label>
-            <div className="space-y-1 text-sm">
-              {EXAMPLE_QUERIES.map((q) => (
-                <Button key={q} variant="ghost" className="h-auto w-full justify-start px-2 py-1" onClick={() => void sendQuestion(q)}>
-                  {q}
-                </Button>
-              ))}
+    <div className="grid min-h-[calc(100vh-10rem)] grid-cols-1 gap-6 lg:grid-cols-12">
+      <aside className="flex flex-col gap-4 lg:col-span-3">
+        <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+          <Tabs
+            value={leftTab}
+            onValueChange={(v) => setLeftTab(v as typeof leftTab)}
+            className="flex h-full flex-col"
+          >
+            <div className="px-3 pb-2 pt-3">
+              <TabsList className="grid h-9 w-full grid-cols-3 rounded-xl bg-muted/50 p-0.5">
+                <TabsTrigger
+                  value="contexto"
+                  className="rounded-lg text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  Contexto
+                </TabsTrigger>
+                <TabsTrigger
+                  value="documentos"
+                  className="rounded-lg text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  Documentos
+                </TabsTrigger>
+                <TabsTrigger
+                  value="ocr"
+                  className="rounded-lg text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  OCR
+                </TabsTrigger>
+              </TabsList>
             </div>
-          </TabsContent>
 
-          <TabsContent value="documentos" className="space-y-3">
-            <Button variant="outline" onClick={() => void refreshDocs()}>
-              Refrescar lista
-            </Button>
-            <DocumentsList docs={docs} />
-          </TabsContent>
+            <div className="flex-1 overflow-hidden">
+              <TabsContent value="contexto" className="m-0 h-full">
+                <ScrollArea className="h-full">
+                  <div className="space-y-5 p-4">
+                    <div className="space-y-2.5">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.txt,.md,.png,.jpg,.jpeg"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void onFileUpload(file);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-4 py-3 text-sm text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-foreground disabled:opacity-60"
+                      >
+                        {uploading ? (
+                          <span className="animate-pulse">Subiendo...</span>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4" />
+                            Subir documento
+                          </>
+                        )}
+                      </button>
+                      <p className="text-center text-[11px] text-muted-foreground">
+                        Soporta PDF, TXT, MD e imágenes.
+                      </p>
+                    </div>
 
-          <TabsContent value="ocr">
-            <OcrUploader />
-          </TabsContent>
-        </Tabs>
-      </div>
+                    <div className="h-px bg-border/60" />
 
-      <div className="space-y-3 rounded-lg border p-3">
-        {error ? (
-          <Alert variant="destructive">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
+                    <div className="space-y-2">
+                      <h4 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Sugerencias
+                      </h4>
+                      <div className="flex flex-col gap-1">
+                        {EXAMPLE_QUERIES.map((q) => (
+                          <button
+                            key={q}
+                            type="button"
+                            onClick={() => void sendQuestion(q)}
+                            disabled={loading}
+                            className="rounded-lg px-3 py-2.5 text-left text-xs leading-relaxed text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </ScrollArea>
+              </TabsContent>
 
-        <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">{messageView}</div>
+              <TabsContent value="documentos" className="m-0 h-full">
+                <ScrollArea className="h-full">
+                  <div className="space-y-4 p-4">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-primary/70" />
+                      <h3 className="text-sm font-medium">
+                        Documentos indexados
+                      </h3>
+                    </div>
+                    <DocumentsList docs={docs} />
+                  </div>
+                </ScrollArea>
+              </TabsContent>
 
-        {loading ? <p className="text-sm text-muted-foreground">Pensando...</p> : null}
+              <TabsContent value="ocr" className="m-0 h-full">
+                <ScrollArea className="h-full">
+                  <div className="p-4">
+                    <OcrUploader />
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            </div>
+          </Tabs>
+        </div>
+      </aside>
 
-        <ChatComposer onSend={sendQuestion} disabled={loading} />
-      </div>
+      <section className="flex flex-col gap-4 lg:col-span-9">
+        <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+          <div className="flex items-center justify-between border-b border-border/60 px-5 py-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary/70" />
+              <span className="text-sm font-medium">Chat con Mentor IA</span>
+            </div>
+            {messages.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setMessages([])}
+                className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-destructive"
+                title="Borrar historial"
+                aria-label="Borrar historial"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+
+          <ScrollArea ref={scrollRef} className="flex-1">
+            <div className="min-h-[400px] p-5">{messageView}</div>
+          </ScrollArea>
+
+          {error ? (
+            <div className="px-5 pb-3">
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </div>
+          ) : null}
+
+          <div className="border-t border-border/60 bg-background/40 p-4">
+            <ChatComposer onSend={sendQuestion} disabled={loading} />
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
-
