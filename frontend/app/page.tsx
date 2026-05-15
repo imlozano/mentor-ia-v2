@@ -3,6 +3,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StudyAssistant } from "@/components/study-assistant";
 import { ReviewPlan } from "@/components/review-plan";
+import { StatusIndicator } from "@/components/status-indicator";
 
 export default function Home() {
   return (
@@ -12,6 +13,7 @@ export default function Home() {
           <h1 className="text-xl font-bold">Mentor IA</h1>
           <p className="text-sm text-muted-foreground">Asistente inteligente de aprendizaje</p>
         </div>
+        <StatusIndicator />
       </header>
 
       <Tabs defaultValue="asistente" className="w-full">
