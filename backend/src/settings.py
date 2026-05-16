@@ -22,7 +22,12 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
 
     # --- Modelos Gemini (embeddings) ---
-    embedding_model: str = "gemini-embedding-001"
+    # Migrado a gemini-embedding-2 el 2026-05-15 porque gemini-embedding-001
+    # del tier gratuito alcanzó el límite RPD 1000 durante las pruebas E2E.
+    # gemini-embedding-2 tiene bucket de cuota separado y MRL nativo a 768.
+    # Si vuelve a quedar limitante en producción, ver CLAUDE.md §2.5 plan B
+    # (text-embedding-3-large de OpenAI).
+    embedding_model: str = "gemini-embedding-2"
     embedding_output_dimensionality: int = 768
     embedding_dim: int = 768
 

@@ -45,7 +45,7 @@ usuario las contradice, el agente debe preguntar antes de proceder.
 | Estilos         | Tailwind CSS 4 + shadcn/ui sobre Radix Primitives       |
 | Backend         | FastAPI + Python 3.11+                                  |
 | Base vectorial  | Qdrant Cloud, colección `mentor_ia_aprendizaje`, 768 dim, COSINE |
-| Embeddings      | Google Gemini `gemini-embedding-001` con `outputDimensionality=768` (MRL, vectores renormalizados) |
+| Embeddings      | Google Gemini `gemini-embedding-2` con `outputDimensionality=768` (MRL, vectores renormalizados) — migrado desde `gemini-embedding-001` el 2026-05-15 por agotamiento de cuota free; ver §2.5 |
 | LLM             | OpenAI `gpt-4o-mini` (chat completions). Decisión documentada en §2.5. |
 | OCR             | OpenAI `gpt-4o-mini` (Vision multimodal sobre chat completions). Decisión documentada en §2.5. |
 | Email           | Make.com Custom Webhook + Gmail Sender                  |
@@ -98,6 +98,20 @@ era incompatible con un sistema multiagente con varias llamadas LLM
 por petición; gpt-4o-mini con créditos pagados ofrece RPM/TPM
 adecuados y precio bajo (~USD 0.15/1M input tokens). Mantener Gemini
 para embeddings preserva la inversión de ingeniería en MRL/COSINE.
+
+**Adenda 2026-05-15 (mismo día):** `gemini-embedding-001` también
+agotó cuota free (1000 RPD) durante la validación E2E. Migrado a
+`gemini-embedding-2` (modelo nuevo con bucket de cuota separado;
+mismo MRL→768 + renormalización). Esto requirió **borrar la colección
+Qdrant y re-indexar** los smoke docs (vectores 001 y 2 no son
+semánticamente comparables).
+
+**Riesgo conocido (plan B):** seguimos en tier gratuito de embeddings.
+Si en producción se vuelven a agotar los 1000 RPD del modelo 2, las
+opciones son: (a) activar billing en Google AI Studio, o (b) migrar
+embeddings también a OpenAI `text-embedding-3-large` (1536d con
+`dimensions=768`, top MTEB, ~USD 0.13/1M tokens). Implementar (b)
+requiere otra ronda de re-indexación de Qdrant.
 
 ## 3. Estructura del repositorio
 
