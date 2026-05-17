@@ -6,7 +6,10 @@
 > espaciado.
 >
 > Asignatura: Administración de Proyectos de Software · Entrega final.
-> Versión: 2.0 · Fecha: 2026-05-11.
+> Versión: 3.0 · Fecha: 2026-05-17.
+>
+> **Demo en vivo:** Frontend en <https://www.iamentor.tech> · Backend en
+> <https://api.iamentor.tech>.
 
 ---
 
@@ -99,7 +102,7 @@ complementarias:
 | ----------------------------------- | -------------------------------------------------- |
 | Sobrecarga de información           | Búsqueda semántica + RAG sobre documentos propios  |
 | Falta de personalización            | El estudiante sube sus propios materiales          |
-| Procesamiento de apuntes físicos    | OCR con Google Cloud Vision                        |
+| Procesamiento de apuntes físicos    | OCR multimodal con OpenAI `gpt-4o-mini` Vision     |
 | Olvido por falta de repaso          | Generación de planes D+1/D+7/D+14/D+30 + email     |
 
 ---
@@ -146,19 +149,19 @@ externos.
 
 ```mermaid
 flowchart LR
-    User((Estudiante)) -->|Navegador| FE[Frontend<br/>Next.js 16]
-    FE -->|fetch / multipart| BE[Backend FastAPI<br/>src/app.py]
+    User((Estudiante)) -->|HTTPS| FE[Frontend Next.js 16<br/>www.iamentor.tech<br/>Vercel]
+    FE -->|HTTPS| BE[Backend FastAPI<br/>api.iamentor.tech<br/>DO Droplet + nginx]
     BE -->|orquesta| AE[AgenteExtraccion]
     BE -->|orquesta| AR[AgenteRespuesta]
     BE -->|orquesta| APR[AgentePlanRepaso]
     AE -->|upsert vectores| QD[(Qdrant Cloud<br/>mentor_ia_aprendizaje)]
     AR -->|query_points| QD
     APR -->|query_points| QD
-    AE -->|OCR imágenes| GV[Google Vision<br/>DOCUMENT_TEXT_DETECTION]
-    BE -->|/ocr-imagen| GV
-    AE -->|embed_documents| GE[Gemini<br/>gemini-embedding-001<br/>outputDimensionality=768]
-    AR -->|embed_query + LLM| GE
-    APR -->|embed_query + LLM| GE
+    AE -->|OCR multimodal| OAI[OpenAI gpt-4o-mini<br/>chat + vision + embeddings]
+    BE -->|/ocr-imagen| OAI
+    AE -->|embed_documents| OAI
+    AR -->|embed_query + LLM| OAI
+    APR -->|embed_query + LLM| OAI
     APR -->|webhook plan| MK[Make.com<br/>Custom Webhook]
     MK -->|Iterator + Aggregator| GM[Gmail Sender]
     GM -->|HTML| User
@@ -177,9 +180,11 @@ flowchart LR
 - **Capa de persistencia.** Qdrant Cloud almacena los vectores
   (embeddings) y sus payloads asociados. El sistema de archivos local del
   backend almacena los documentos originales en `data/ejemplos/`.
-- **Capa de servicios externos.** Google Gemini para generación de texto
-  y embeddings, Google Cloud Vision para OCR, Make.com como pasarela de
-  email.
+- **Capa de servicios externos.** OpenAI `gpt-4o-mini` (chat
+  completions, vision multimodal y `text-embedding-3-large` para
+  embeddings de 768 dimensiones con MRL), Make.com como pasarela de
+  email. La elección de OpenAI 100% se justifica en §6.3 tras
+  migraciones documentadas en §6.7.
 
 ### 4.2 Patrón de comunicación
 
@@ -200,46 +205,56 @@ agentes invoca, qué servicios externos consume) está en
 
 | Componente              | Versión / Detalle                                      |
 | ----------------------- | ------------------------------------------------------ |
-| Framework               | Next.js 16.2.4 con App Router                          |
-| Lenguaje                | TypeScript 5                                           |
-| Runtime UI              | React 19.2.5                                           |
+| Framework               | Next.js 16.2.6 con App Router (Turbopack)              |
+| Lenguaje                | TypeScript 5 (`strict: true`)                          |
+| Runtime UI              | React 19.2.4                                           |
 | Estilos                 | Tailwind CSS 4 (vía `@tailwindcss/postcss`)            |
 | Sistema de componentes  | shadcn/ui sobre Radix Primitives                       |
 | Íconos                  | lucide-react                                           |
 | Utilidades de clase     | `class-variance-authority`, `clsx`, `tailwind-merge`   |
-| Despliegue              | Vercel · https://mentor-ia-sistema.vercel.app/         |
+| Gestor de paquetes      | pnpm 11+ con `minimumReleaseAge: 1440` (cooldown 24 h supply-chain) |
+| Despliegue              | Vercel · <https://www.iamentor.tech>                   |
 
 ### 5.2 Backend
 
 | Componente              | Versión / Detalle                                      |
 | ----------------------- | ------------------------------------------------------ |
-| Framework web           | FastAPI (Python 3.9+)                                  |
+| Framework web           | FastAPI (Python 3.11+)                                 |
 | Servidor ASGI           | Uvicorn                                                |
-| Procesamiento PDF       | `pypdf` 6.3.0                                          |
-| Cliente Qdrant          | `qdrant-client`                                        |
-| Validación              | Pydantic (incluido con FastAPI)                        |
-| Cliente HTTP            | `httpx` para llamadas a Gemini, Vision y Make.com      |
+| Gestor de paquetes      | `uv` 0.11+ con `exclude-newer = "7 days"` (cooldown supply-chain) |
+| Empaquetado             | Docker Compose (imagen `python:3.11-slim`, usuario no-root) |
+| Procesamiento PDF       | `pypdf` 6.x + `pypdfium2` (para render de PDF escaneado a PNG previo a OCR) |
+| Cliente Qdrant          | `qdrant-client` (modo async)                           |
+| Cliente OpenAI          | `openai` 1.x (modo `AsyncOpenAI`)                      |
+| Validación              | Pydantic 2.x + `pydantic-settings` para variables de entorno |
+| Cliente HTTP            | `httpx` para llamadas a Make.com                       |
+| Logging                 | `loguru` con formato estructurado y toggle `JSON_LOGS` |
 
 ### 5.3 Base vectorial
 
 | Aspecto                 | Valor                                                  |
 | ----------------------- | ------------------------------------------------------ |
-| Servicio                | Qdrant Cloud                                           |
+| Servicio                | Qdrant Cloud (tier gratuito 1 GB)                      |
 | Colección               | `mentor_ia_aprendizaje`                                |
 | Dimensión del vector    | 768                                                    |
 | Distancia               | COSINE                                                 |
-| Modelo de embeddings    | `gemini-embedding-001` (Google Gemini) con `outputDimensionality=768` (MRL) |
+| Modelo de embeddings    | OpenAI `text-embedding-3-large` con `dimensions=768` (MRL nativo + renormalización a norma unitaria) |
 
 El detalle del modelo de datos vectorial está en
 [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md).
 
 ### 5.4 Servicios de IA externos
 
+Todo el stack de IA queda concentrado en un único proveedor para
+simplificar credenciales, cuotas y observabilidad. La justificación
+de esta consolidación está en §6.3 (decisión final) y §6.7
+(cronología de migraciones).
+
 | Servicio                          | Uso                                              |
 | --------------------------------- | ------------------------------------------------ |
-| Google Gemini `gemini-flash-latest` | Generación de respuestas y planes de repaso     |
-| Google Gemini `gemini-embedding-001` | Generación de vectores truncados a 768 dimensiones con MRL (`outputDimensionality=768`) |
-| Google Cloud Vision                 | OCR con `DOCUMENT_TEXT_DETECTION`                |
+| OpenAI `gpt-4o-mini` (chat completions) | Generación de respuestas RAG y planes de repaso |
+| OpenAI `gpt-4o-mini` (vision multimodal) | OCR de imágenes (PNG/JPG) y páginas PDF escaneadas |
+| OpenAI `text-embedding-3-large`   | Embeddings de 768 dimensiones con MRL nativo     |
 
 ### 5.5 Automatización
 
@@ -248,6 +263,17 @@ El detalle del modelo de datos vectorial está en
 | Make.com (Custom Webhook)         | Recibir el plan de repaso generado por el sistema |
 | Make.com (Iterator + Aggregator)  | Formatear cada sesión del plan                   |
 | Gmail Sender (módulo de Make.com) | Enviar el correo HTML al estudiante              |
+
+### 5.6 Infraestructura y despliegue
+
+| Capa                 | Plataforma / detalle                                  |
+| -------------------- | ----------------------------------------------------- |
+| Frontend             | Vercel (build automático desde rama `main`, root `frontend/`) |
+| Backend              | DigitalOcean Droplet Ubuntu 24.04 LTS                 |
+| Reverse proxy + TLS  | nginx 1.24 + Let's Encrypt (certificado HTTPS automático) |
+| Contenedor backend   | Docker Compose con `restart: unless-stopped` y healthcheck cada 30 s |
+| DNS                  | Orderbox (subdominio `api.` apunta al Droplet; `www.` y apex apuntan a Vercel) |
+| Storage local        | Volumen `./data/ejemplos/:/app/data/ejemplos` para los archivos originales subidos |
 
 ---
 
@@ -293,19 +319,43 @@ comparable en funcionalidad pero su tier gratuito es más restrictivo en
 operaciones. Chroma se descartó porque requeriría correr la base vectorial
 junto al backend, complicando el despliegue.
 
-### 6.3 ¿Por qué Gemini y no OpenAI?
+### 6.3 ¿Por qué OpenAI 100% (y no Gemini, ni un proveedor mixto)?
 
-Se eligió **Google Gemini** principalmente porque:
+El sistema fue diseñado originalmente para usar **Google Gemini**
+(`gemini-flash-latest` para chat, `gemini-embedding-001` para vectores)
+y **Google Cloud Vision** para OCR. Esa decisión se documentó en la
+versión 2.0 de este documento (mayo 11) con tres razones: tier
+gratuito real, integración natural entre servicios Google y cuota
+de embeddings holgada.
 
-- Ofrece un tier gratuito real con suficiente cuota para un proyecto
-  académico.
-- El modelo de embeddings (`gemini-embedding-001`) es gratuito hasta un
-  límite generoso.
-- El servicio OCR de Google Cloud (Vision) se integra naturalmente con
-  el ecosistema Google Cloud, evitando configurar otro proveedor.
+Durante el despliegue y validación de la entrega final (mayo 15–17)
+se observó empíricamente que el tier gratuito de Gemini **no era
+sostenible para un sistema con healthcheck cada 30 segundos y uso
+RAG continuo**:
 
-OpenAI ofrece modelos más potentes en algunos benchmarks, pero requiere
-saldo prepago desde el primer uso y su API de embeddings tiene costo.
+- `gemini-flash-latest` quedó capado a 20 RPD en el tier free (cuota
+  reducida tras el lanzamiento de Gemini 3 Flash).
+- `gemini-embedding-001` topó los 1000 RPD (~2880 pings diarios solo
+  del healthcheck del Droplet).
+- `gemini-embedding-2`, modelo nuevo con bucket de cuota separado,
+  también topó 1000 RPD en horas durante el smoke E2E.
+
+La conclusión defendible es que **el tier gratuito de Gemini no está
+calibrado para un sistema multiagente con múltiples llamadas por
+petición**. Las alternativas eran (a) activar billing en Google AI
+Studio o (b) consolidar en OpenAI. Se eligió (b) porque:
+
+- El estudiante ya disponía de créditos OpenAI.
+- Concentrar toda la IA en un único proveedor simplifica observabilidad,
+  cuotas y rotación de credenciales (una sola key, una sola consola).
+- `gpt-4o-mini` ofrece calidad comparable a Gemini-flash para chat y
+  planes de estudio, y su variante Vision sustituye Google Cloud
+  Vision sin coste adicional de configuración.
+- `text-embedding-3-large` con `dimensions=768` mantiene la
+  compatibilidad con la colección Qdrant existente.
+
+El detalle cronológico de las dos migraciones (LLM/OCR y embeddings)
+está en §6.7.
 
 ### 6.4 ¿Por qué 768 dimensiones y distancia coseno?
 
@@ -325,11 +375,13 @@ La distancia **COSINE** se eligió porque:
 - Es la métrica recomendada por la documentación de Google Gemini para
   embeddings semánticos.
 
-Una consecuencia operativa del cambio a `gemini-embedding-001`: al
-truncar con MRL los vectores resultantes pierden la norma unitaria
-(medido empíricamente: norma ≈ 0.57 en pruebas locales). El wrapper
-`services/gemini.py` debe **renormalizar cada vector** antes de
-upsertear en Qdrant, de lo contrario la métrica COSINE se degrada.
+Una consecuencia operativa de usar MRL: al truncar el vector la
+norma euclídea deja de ser exactamente 1. Tanto
+`gemini-embedding-001` como `text-embedding-3-large` con
+`dimensions=768` presentan este efecto. El wrapper
+`services/openai_service.py` aplica una **renormalización explícita**
+de cada vector antes de upsertear en Qdrant; sin ese paso la métrica
+COSINE se degrada y los scores de búsqueda se vuelven inestables.
 
 Las alternativas (euclidiana, producto punto) serían válidas pero menos
 apropiadas para texto.
@@ -363,82 +415,129 @@ progresivamente el intervalo. No se implementó un algoritmo adaptativo
 requeriría un sistema de seguimiento de progreso fuera del alcance del
 prototipo.
 
-### 6.7 Migración de `text-embedding-004` a `gemini-embedding-001`
+### 6.7 Cronología de migraciones de proveedor (mayo 2026)
 
-El sistema fue diseñado originalmente para usar el modelo de embeddings
-`text-embedding-004` de Google Gemini. Sin embargo, durante la
-preparación de la entrega final se identificó que ese modelo fue
-**deprecado y apagado el 14 de enero de 2026** según el calendario
-oficial de Google ([Gemini API deprecations](https://ai.google.dev/gemini-api/docs/deprecations)).
-Esta sección documenta la decisión de migración.
+Esta sección documenta de forma honesta las tres migraciones de
+modelo que el sistema atravesó entre mayo 11 y mayo 17 de 2026. Es
+un caso de estudio práctico de cómo restricciones operativas
+(cuotas, deprecaciones) obligan a revisar decisiones de diseño.
+Las migraciones se gestionaron con borrado y re-indexación de la
+colección Qdrant cuando los vectores dejaron de ser comparables
+entre modelos.
 
-#### 6.7.1 ¿Por qué hubo que migrar?
+#### 6.7.1 Línea de tiempo
 
-El apagado de `text-embedding-004` no es un cambio opcional: las
-llamadas al modelo retornan error y rompen la cadena de ingesta y
-consulta. La migración era, por tanto, **obligatoria** para que el
-sistema siguiera siendo funcional a fecha de la entrega.
+| Fecha       | Cambio                                                       | Motivo                                             |
+| ----------- | ------------------------------------------------------------ | -------------------------------------------------- |
+| < 2026-01   | `text-embedding-004` (Google Gemini)                         | Modelo histórico de embeddings                     |
+| 2026-01-14  | `text-embedding-004` → `gemini-embedding-001`                | Deprecación oficial de Google                      |
+| 2026-05-15  | `gemini-flash-latest` (LLM) + Google Vision (OCR) → OpenAI `gpt-4o-mini` | Cuota Gemini-flash free reducida a 20 RPD          |
+| 2026-05-15  | `gemini-embedding-001` → `gemini-embedding-2`                | Topado 1000 RPD; bucket de cuota separado para el 2 |
+| 2026-05-17  | `gemini-embedding-2` → OpenAI `text-embedding-3-large`       | Topado 1000 RPD también; consolidación 100% OpenAI |
 
-#### 6.7.2 ¿Por qué `gemini-embedding-001` y no `gemini-embedding-2`?
+#### 6.7.2 Migración 1 — Deprecación de `text-embedding-004`
 
-Google ofrece dos modelos posteriores como sucesores. Se evaluaron
-ambos:
+El modelo histórico `text-embedding-004` fue **apagado el 14 de
+enero de 2026** según el calendario oficial de Google
+([Gemini API deprecations](https://ai.google.dev/gemini-api/docs/deprecations)).
+La migración a `gemini-embedding-001` (reemplazo oficial GA desde
+julio 2025) fue obligatoria. Se mantuvo la dimensión 768 mediante
+`outputDimensionality=768` aprovechando que `gemini-embedding-001`
+soporta MRL nativamente.
 
-| Criterio                              | `gemini-embedding-001`           | `gemini-embedding-2`              |
-| ------------------------------------- | -------------------------------- | --------------------------------- |
-| Estado oficial                        | GA estable (desde julio 2025)    | Más reciente (abril 2026)         |
-| Reemplazo oficial de `text-embedding-004` | Sí (documentado por Google)  | No (sucesor de gen anterior)      |
-| Modalidad                             | Solo texto                       | Multimodal (texto, imagen, audio) |
-| Soporte de `outputDimensionality` (MRL) | Sí (128–3072)                  | Sí (128–3072)                     |
-| Adecuación al alcance académico       | Alta (estable y defendible)      | Menor (introduce complejidad innecesaria) |
+#### 6.7.3 Migración 2 — LLM/OCR Gemini → OpenAI
 
-Se eligió **`gemini-embedding-001`** porque es el reemplazo oficial
-documentado por Google, está en disponibilidad general (GA) desde julio
-de 2025 y su comportamiento es estable. `gemini-embedding-2` añade
-multimodalidad que el sistema actual no necesita (el OCR de imágenes lo
-hace Google Cloud Vision en una capa anterior; ver §4.1) y, al ser más
-reciente, su estabilidad a largo plazo es menos predecible. Para un
-prototipo académico que se defiende en sustentación, la opción
-conservadora y documentada es preferible.
+Durante la validación E2E pre-despliegue se detectó que
+`gemini-flash-latest` (tier gratuito) tiene un límite de **20
+requests por día** por modelo, tras el lanzamiento de Gemini 3
+Flash. Esa cuota es insuficiente para un sistema multiagente
+que ejecuta una llamada LLM por cada query RAG y cuatro por cada
+plan de repaso. El agente de plan caía silenciosamente a un
+fallback local con descripciones genéricas, comprometiendo la
+calidad de la demostración.
 
-#### 6.7.3 ¿Por qué 768 dimensiones con MRL en lugar de las 3072 nativas?
+Se migró todo el LLM y OCR a **OpenAI `gpt-4o-mini`** en una sola
+sesión. El servicio OCR de Google Cloud Vision se sustituyó por la
+modalidad Vision del mismo `gpt-4o-mini` (chat multimodal con
+imágenes inline), eliminando una dependencia y un archivo de
+credenciales (`credentials/vision.json`).
 
-`gemini-embedding-001` produce por defecto vectores de 3072 dimensiones.
-El sistema usa 768 mediante el parámetro `outputDimensionality=768`,
-que aplica **Matryoshka Representation Learning (MRL)** sobre el vector
-original. MRL es una técnica de entrenamiento (Kusupati et al.,
-*NeurIPS 2022*) que permite truncar el vector preservando la mayor
-parte de la calidad semántica.
+#### 6.7.4 Migración 3 — Embeddings Gemini → OpenAI
 
-Las razones para fijar 768 dimensiones son tres:
+Tras la migración 2, los embeddings seguían en Gemini. Durante el
+despliegue inicial en producción (DigitalOcean + Vercel) y el
+ejercicio de pruebas, `gemini-embedding-001` topó su cuota free de
+**1000 RPD**. Se intentó como mitigación inmediata migrar a
+`gemini-embedding-2`, modelo nuevo con bucket de cuota separado:
+también topó 1000 RPD el mismo día por el efecto combinado del
+healthcheck cada 30 s (2880 pings/día) más el uso real.
 
-1. **Compatibilidad con la decisión previa de Qdrant.** La colección
-   `mentor_ia_aprendizaje` ya fue creada con `size=768` y
-   `distance=COSINE`. Migrar a 3072 obligaría a borrar la colección,
-   recrearla y re-indexar todo el corpus. Mantener 768 limita el
+Se aplicó el plan B documentado previamente en `CLAUDE.md` §2.5 y
+se migraron los embeddings a **OpenAI `text-embedding-3-large`**
+con parámetro `dimensions=768` (MRL nativo). Se eliminó por
+completo el código de `GeminiService` y la dependencia
+`google-genai`. La colección Qdrant se volvió a borrar y re-indexar
+porque vectores de modelos distintos no son semánticamente
+comparables.
+
+#### 6.7.5 Por qué 768 dimensiones con MRL (decisión arquitectónica)
+
+Las tres migraciones preservaron la dimensión 768 por tres razones
+que siguen vigentes hoy con OpenAI:
+
+1. **Compatibilidad con la colección Qdrant.** Cambiar la dimensión
+   obligaría a borrar y recrear la colección. Mantener 768 limita el
    alcance del cambio al wrapper del modelo.
-2. **Eficiencia operativa.** Un vector de 768 dimensiones ocupa 4 veces
-   menos memoria que uno de 3072 y la búsqueda por similitud en Qdrant
-   es proporcionalmente más rápida. Para el corpus académico esperado
-   (decenas de documentos) ambos serían viables, pero 768 es más
-   eficiente sin pérdida práctica de calidad.
-3. **Calidad preservada por MRL.** El truncamiento Matryoshka no es un
-   recorte arbitrario: el modelo se entrenó para que los primeros
-   componentes del vector concentren la mayor cantidad de información
-   semántica. Esto permite usar 768 dims con calidad comparable a
-   modelos diseñados nativamente para 768.
+2. **Eficiencia operativa.** Un vector de 768 dims ocupa cuatro veces
+   menos memoria y la búsqueda por similitud en Qdrant es
+   proporcionalmente más rápida que con 3072 dims nativas.
+3. **Calidad preservada por MRL.** Tanto Google Gemini como OpenAI
+   entrenan sus modelos para que los primeros componentes del vector
+   concentren la mayor cantidad de información semántica (Kusupati
+   et al., *NeurIPS 2022*). Truncar a 768 con MRL preserva el grueso
+   de la calidad semántica del modelo de 3072.
 
-#### 6.7.4 Detalle técnico: renormalización post-truncamiento
+#### 6.7.6 Lección de ingeniería
 
-Al truncar un vector con MRL, su norma euclídea deja de ser exactamente
-1. En pruebas locales con `gemini-embedding-001` y
-`outputDimensionality=768`, la norma de los vectores devueltos es del
-orden de 0.57. Como la distancia COSINE en Qdrant está optimizada para
-vectores unitarios, el wrapper `services/gemini.py` aplica una
-**renormalización explícita** (divide cada componente por la norma
-euclídea) antes de retornar el vector. Esto garantiza que la métrica
-COSINE en Qdrant siga siendo equivalente al producto punto y no se
-degrade la calidad de la búsqueda.
+La cronología deja una lección práctica para defender en sustentación:
+las decisiones técnicas no son inmutables. Validar continuamente las
+**asunciones operativas** (cuotas, deprecaciones, calidad real en
+producción) es parte del trabajo de ingeniería tanto como la elección
+inicial. El sistema mantuvo su contrato (RAG funcional, OCR funcional,
+planes de repaso por correo) durante tres cambios de modelo en seis
+días gracias al desacoplamiento entre los agentes y la capa de
+servicios externos.
+
+### 6.8 Heurística de comportamiento RAG y sensibilidad cross-lingual
+
+El sistema usa un umbral de similitud coseno **`RAG_SCORE_THRESHOLD =
+0.55`** sobre los embeddings normalizados. Si ningún chunk del corpus
+indexado supera ese score para una consulta dada, el sistema cae al
+modelo base (LLM sin contexto) y devuelve la respuesta con badge
+`origen: modelo`, sin citar fuentes. Es una salvaguarda explícita
+contra la alucinación de citas falsas.
+
+Los smoke tests de Fase 14 (ver `docs/specs/smoke-tests.md`)
+confirmaron dos comportamientos:
+
+1. **Cero falsos positivos en consultas off-topic** (NEG correctas
+   8/8). El umbral 0.55 está bien calibrado: nunca se citaron
+   fuentes inventadas, ni siquiera cuando el LLM podía responder por
+   conocimiento general (p. ej. *"What is the Krebs cycle?"*).
+2. **Sensibilidad al mismatch de idioma.** `text-embedding-3-large`
+   es razonablemente cross-lingual pero baja el score por debajo del
+   umbral cuando el idioma de la pregunta difiere del idioma del
+   documento. En el corpus de prueba mixto (inglés/español) este es
+   el caso más común de "falso negativo" RAG: el documento existe en
+   el índice pero la pregunta en otro idioma no lo recupera. La
+   mitigación práctica es preguntar en el idioma del documento.
+
+Estas dos propiedades son las que el evaluador debe poder
+**reproducir en vivo** durante la sustentación: una query de
+contenido específico en el idioma correcto retorna `origen: rag` con
+fuentes citadas y score; una query meta-archivo o en idioma cruzado
+retorna `origen: modelo` con respuesta genérica. La heurística
+operativa para demos está en `CLAUDE.md` §8.1.
 
 ---
 
@@ -453,44 +552,54 @@ identificadas durante el desarrollo:
 - **No hay autenticación.** Cualquier persona con la URL puede usar el
   frontend. Esto es intencional para el alcance académico; se documenta
   como mejora futura.
-- **No hay control de cuotas.** Un usuario podría subir cientos de
-  documentos consecutivos y agotar la cuota gratuita de Gemini.
-- **Los chunks viejos no se borran al re-subir un documento.** Si se sube
-  `apuntes.pdf` dos veces, los chunks del primer upload quedan huérfanos
-  en Qdrant. Esto se debe a que el `point_id` actual no es idempotente
-  (ver [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md), sección 5).
+- **No hay control de cuotas por usuario.** El sistema confía en la
+  cuota global del proveedor IA (OpenAI con créditos del estudiante).
+  Un uso intensivo podría agotar los créditos disponibles.
+- **Los chunks viejos no se borran al re-subir un documento.** El
+  `point_id` actual (UUIDv5 derivado de `source_path|chunk_index`) es
+  idempotente para el mismo número de chunks, pero si una nueva versión
+  del documento genera más chunks que la anterior, los chunks
+  excedentes de la versión vieja quedan huérfanos en Qdrant. Ver
+  [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md), sección 5.
 
 ### 7.2 Limitaciones técnicas
 
 - **No hay procesamiento asíncrono real.** Los endpoints son síncronos.
-  Una subida grande bloquea la respuesta hasta que termine la indexación.
-- **No hay tests automatizados.** Las validaciones se hicieron de forma
-  manual. Es una deuda técnica reconocida.
-- **No hay observabilidad estructurada.** El logging se hace con `print()`
-  en lugar de un logger configurado, lo que dificulta debugging en
-  producción.
-- **CORS está permisivo en desarrollo y restrictivo en producción.** En
-  producción solo se permite el dominio `mentor-ia-sistema.vercel.app`.
-  Cualquier otro frontend que quisiera consumir la API sería rechazado.
-- **El indicador "Online" del header es decorativo.** No consulta el
-  endpoint `/health`. Es un punto de mejora documentado.
+  Una subida grande bloquea la respuesta HTTP hasta que termina la
+  indexación. Para subidas típicas (<10 MB) el tiempo es aceptable; para
+  PDFs muy grandes o muchos imágenes en cola, esto sería una limitación.
+- **No hay tests unitarios automatizados.** Las validaciones se hicieron
+  con smoke tests end-to-end (ver `docs/specs/smoke-tests.md`); no se
+  añadieron tests unitarios por agente. Es una deuda técnica reconocida.
+- **`max_chunks=100` por documento.** Documentos extremadamente largos
+  se truncan al chunk 100. Es una salvaguarda contra documentos
+  patológicos pero también puede perder contenido de archivos legítimos
+  muy extensos.
 
 ### 7.3 Limitaciones de robustez
 
-- **Si Qdrant falla, el sistema devuelve 500 sin mensaje útil.** Falta
-  manejo explícito de la excepción.
-- **El correo del plan de repaso se envía con respuesta 200 incluso si
-  Make.com falla.** El backend no espera confirmación de Gmail antes de
-  responder. Si la URL del webhook caduca, el usuario no se entera.
-- **No hay validación de email en el endpoint `/plan-repaso`.** Se acepta
-  cualquier string como destinatario.
+- **Manejo de errores granular pendiente.** Los endpoints `/query`,
+  `/plan-repaso` y `/ocr-imagen` capturan excepciones y devuelven HTTP
+  503 con mensaje genérico ("fallo en servicios externos"). El cliente
+  no puede distinguir si el problema fue Qdrant, OpenAI o Make.com.
+  Es un siguiente paso natural pero no bloqueante.
+- **El correo del plan de repaso se considera enviado al recibir 2xx
+  del webhook Make.com.** Si Make procesa pero Gmail rechaza el envío
+  posteriormente (o el escenario está pausado), el sistema reporta
+  `email_enviado=true` sin reflejar el fallo final. Mitigación:
+  comprobar bandeja como parte del flujo de demostración.
+- **Sensibilidad cross-lingual del RAG.** Embeddings con mismatch de
+  idioma query↔documento pueden no superar el umbral 0.55 aunque el
+  contenido sea relevante. Documentado y reproducible en
+  `docs/specs/smoke-tests.md` §2.2.
 
 ---
 
 ## 8. Estado funcional actual
 
 A la fecha de esta entrega, el sistema cumple los 10 requisitos
-funcionales definidos en el documento de requerimientos:
+funcionales definidos en el documento de requerimientos y está
+desplegado en producción con HTTPS:
 
 | RF  | Funcionalidad                                          | Estado        |
 | --- | ------------------------------------------------------ | ------------- |
@@ -503,15 +612,32 @@ funcionales definidos en el documento de requerimientos:
 | RF7 | Visualización de documentos indexados                  | Implementado  |
 | RF8 | UI responsive con tres módulos (Contexto / Documentos / OCR) | Implementado |
 | RF9 | API REST                                               | Implementado  |
-| RF10| Endpoint `/health`                                     | Implementado  |
+| RF10| Endpoint `/health` con polling desde el frontend       | Implementado  |
 
-**Frontend desplegado:** https://mentor-ia-sistema.vercel.app/ (operativo).
+**Frontend desplegado:** <https://www.iamentor.tech> (Vercel,
+operativo, HTTPS válido).
 
-**Backend:** desplegable bajo demanda. El despliegue continuo previo en
-Railway se descontinuó por inactividad; el backend está listo para
-re-desplegar en cualquier plataforma compatible con Python/FastAPI (se
-está evaluando DigitalOcean Droplet con Docker Compose para la
-sustentación final).
+**Backend desplegado:** <https://api.iamentor.tech> (DigitalOcean
+Droplet Ubuntu 24.04, Docker Compose con `restart: unless-stopped`,
+nginx 1.24 como reverse proxy, certificado HTTPS automático con
+Let's Encrypt y renovación vía cron de `certbot`).
+
+### 8.1 Smoke tests finales (Fase 14)
+
+Se ejecutó una batería end-to-end contra el backend en producción el
+2026-05-17. Resumen:
+
+| Métrica                                          | Valor                       |
+| ------------------------------------------------ | --------------------------- |
+| Documentos indexados durante el smoke            | 11 (50 chunks reales + corpus académico de muestra) |
+| Queries RAG ejecutadas (POS + NEG)               | 19 (más 6 re-tests cross-lingual) |
+| Falsos positivos en NEG (alucinación de cites)   | **0**                       |
+| Latencia mediana                                 | 3.2 s                       |
+| Latencia mínima / máxima                         | 1.9 s / 7.5 s               |
+| OCR multimodal — keywords extraídas correctamente | MrBeast, Framingham Heart Study, obesidad (validadas en chunks indexados) |
+
+Detalle completo, queries usadas, resultados y conclusiones en
+[`docs/specs/smoke-tests.md`](../specs/smoke-tests.md).
 
 ---
 
@@ -531,29 +657,47 @@ aspecto se documenta en archivos especializados:
 
 ## 10. Trabajo futuro
 
-Las siguientes mejoras se identificaron durante el desarrollo pero quedan
-fuera del alcance académico de este corte. Se listan en orden aproximado
-de valor/esfuerzo:
+Algunas mejoras identificadas durante el desarrollo se completaron
+antes de la entrega; otras siguen abiertas. La distinción es relevante
+para evaluar la madurez del prototipo.
 
-1. **Idempotencia en la ingesta.** Cambiar el `point_id` de
-   `uuid.uuid4().int >> 64` a UUIDv5 determinístico para evitar
-   duplicados al re-indexar un mismo documento.
-2. **Healthcheck real en el indicador "Online".** Hacer que el badge del
-   header consulte periódicamente el endpoint `/health` y refleje el
-   estado real del backend.
-3. **Manejo de errores granular.** Distinguir errores de Qdrant, Gemini,
-   Vision y Make.com en las respuestas, en lugar de un 500 genérico.
-4. **Borrado de chunks huérfanos al re-subir un documento.** Antes de
-   re-indexar, eliminar los chunks previos asociados al mismo
-   `source_path`.
-5. **Validación de email con `EmailStr` de Pydantic** en el endpoint
-   `/plan-repaso`.
-6. **Logging estructurado** (JSON con `loguru` o `structlog`) en lugar
-   de `print()`.
-7. **Pruebas unitarias** para cada agente, con mocks de Qdrant, Gemini
-   y Vision.
-8. **Tests de extremo a extremo** del flujo de carga → consulta →
-   respuesta.
+### 10.1 Mejoras completadas durante el desarrollo
+
+- ✅ **Idempotencia en la ingesta** — `point_id` derivado con UUIDv5
+  determinístico desde `source_path|chunk_index`.
+- ✅ **Healthcheck real en el indicador "Online"** — `StatusIndicator`
+  del frontend consulta `/health` cada 30 segundos y refleja el estado
+  real del backend (verde si todo OK, ámbar si degradado, rojo si caído).
+- ✅ **Logging estructurado** — `loguru` con formato JSON opcional vía
+  variable `JSON_LOGS=1`; cada log incluye `request_id` propagado por
+  middleware desde el header `X-Request-ID`.
+- ✅ **Validación de email** con `EmailStr` de Pydantic en
+  `/plan-repaso`.
+- ✅ **Tests end-to-end** documentados en `docs/specs/smoke-tests.md`
+  con resultados reales contra producción.
+- ✅ **Manejo de errores básico** — los endpoints capturan excepciones
+  y devuelven HTTP 503 con mensaje claro en lugar de 500 genérico.
+
+### 10.2 Mejoras pendientes para iteraciones futuras
+
+Orden aproximado por valor/esfuerzo:
+
+1. **Manejo de errores granular por servicio.** Distinguir errores de
+   Qdrant, OpenAI y Make.com en las respuestas, en lugar del 503
+   genérico actual. Permitiría que el cliente reintente solo cuando
+   tenga sentido.
+2. **Borrado de chunks huérfanos al re-subir.** Antes de re-indexar
+   un documento existente, eliminar los chunks previos asociados al
+   mismo `source_path` para evitar acumulación cuando la nueva versión
+   genera menos chunks que la anterior.
+3. **Tests unitarios por agente** con mocks de Qdrant y OpenAI.
+4. **Procesamiento asíncrono real** para uploads pesados (cola de
+   trabajos con notificación al cliente cuando termine).
+5. **Confirmación end-to-end del envío de email** comprobando con la
+   API de Gmail (vía Make.com escenario más complejo) que el correo
+   efectivamente llegó.
+6. **Soporte para chunking adaptativo** según tipo de documento
+   (capítulos en libros, secciones en papers).
 
 Lo que **no** se contempla como trabajo futuro porque excede el alcance
 académico: monetización, multitenant, autenticación con JWT,
@@ -563,7 +707,7 @@ integraciones con LMS, app móvil nativa, fine-tuning de modelos propios.
 
 ## 11. Para defender en sustentación
 
-Cuatro puntos clave que deben quedar claros al exponer este documento:
+Cinco puntos clave que deben quedar claros al exponer este documento:
 
 1. **El proyecto es un prototipo académico funcional, no un producto
    comercial.** Esta frontera se respeta en todas las decisiones de
@@ -575,21 +719,37 @@ Cuatro puntos clave que deben quedar claros al exponer este documento:
 2. **Las decisiones técnicas tienen justificación, no son arbitrarias.**
    Qdrant se eligió frente a Pinecone y Chroma por una combinación
    específica de tier gratuito, filtros por payload y opción de
-   self-hosting. La dimensión 768 la impone el modelo de embeddings, no
-   es libre. La cadencia D+1/D+7/D+14/D+30 se inspira en SuperMemo.
+   self-hosting. La consolidación en OpenAI `gpt-4o-mini` para chat,
+   OCR y embeddings se eligió tras evidencia operativa de que el tier
+   gratuito de Gemini no soportaba el patrón de uso del sistema (§6.3 y
+   §6.7). La dimensión 768 se mantuvo a través de las migraciones para
+   evitar borrar la colección Qdrant en cada cambio (§6.4 y §6.7.5).
+   La cadencia D+1/D+7/D+14/D+30 se inspira en SuperMemo SM-2.
 
-3. **Las limitaciones están documentadas honestamente.** No tener tests,
-   no tener autenticación y no tener procesamiento asíncrono no son
-   omisiones ocultas: son decisiones de alcance reconocidas en la
+3. **Las limitaciones están documentadas honestamente.** No tener tests
+   unitarios, no tener autenticación y no tener procesamiento asíncrono
+   no son omisiones ocultas: son decisiones de alcance reconocidas en la
    sección 7. Reconocerlas es parte del criterio de ingeniería, no una
    debilidad.
 
 4. **El sistema cumple los 10 requisitos funcionales del documento de
-   requerimientos.** El cumplimiento se verifica abriendo el frontend en
-   Vercel y, con el backend corriendo, ejecutando los flujos completos
-   (subir documento → consultar → recibir respuesta con fuentes; generar
-   plan → recibir email).
+   requerimientos** y está **desplegado en producción** con HTTPS
+   válido. El cumplimiento se verifica abriendo
+   <https://www.iamentor.tech> y ejecutando los flujos completos (subir
+   documento → consultar → recibir respuesta con fuentes; generar plan
+   → recibir email). Los smoke tests del 2026-05-17 (Fase 14) validan
+   precisión RAG, ausencia de falsos positivos y rendimiento de OCR
+   multimodal en condiciones reales.
+
+5. **Las tres migraciones de proveedor de IA documentadas en §6.7 son
+   un caso de estudio práctico.** El sistema mantuvo su contrato
+   funcional durante tres cambios de modelo en seis días gracias al
+   desacoplamiento entre los agentes y la capa de servicios externos.
+   Eso es un punto fuerte de la arquitectura, no una debilidad: una
+   decisión inicial puede revisarse cuando las restricciones operativas
+   lo justifican, y el código permitió esa flexibilidad sin reescribir
+   la lógica de negocio.
 
 ---
 
-_Última actualización: 2026-05-11._
+_Última actualización: 2026-05-17._
