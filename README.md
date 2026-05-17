@@ -1,76 +1,110 @@
-# Mentor IA — v2
+# Mentor IA
 
-> Sistema multiagente de aprendizaje con RAG sobre documentos propios,
-> OCR de imágenes y planes de repaso espaciado por correo.
->
-> Proyecto académico de la asignatura **Administración de Proyectos de
-> Software** — Tecnología en Desarrollo de Software, Universidad
-> Tecnológica de Pereira.
+Sistema multiagente de aprendizaje con **RAG** sobre documentos propios,
+**OCR** multimodal e **inteligencia generativa** para planes de repaso
+espaciado con notificación por correo.
 
-Frontend desplegado: <https://mentor-ia-sistema.vercel.app/>
+🌐 **Demo en vivo:** <https://www.iamentor.tech>
 
 ---
+
+## Características
+
+- 💬 Chat con citación de fuentes (RAG) sobre tus PDF, TXT, Markdown e imágenes.
+- 📄 OCR multimodal para PDF escaneados y capturas de imagen.
+- 📅 Planes de repaso espaciado generados automáticamente (D+1 · D+7 · D+14 · D+30).
+- ✉️ Envío opcional del plan al correo del usuario.
+- 🟢 Healthcheck público y degradación visible cuando un servicio cae.
+
+## Stack
+
+| Capa                 | Tecnología                                                    |
+| -------------------- | ------------------------------------------------------------- |
+| Frontend             | Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · shadcn/ui |
+| Backend              | FastAPI · Python 3.11 · `uv` · Docker Compose                 |
+| Base vectorial       | Qdrant Cloud · 768 dims · distancia COSINE                    |
+| Embeddings           | OpenAI `text-embedding-3-large` (768d con MRL + renormalización) |
+| LLM (chat + plan)    | OpenAI `gpt-4o-mini`                                          |
+| OCR                  | OpenAI `gpt-4o-mini` Vision (multimodal)                      |
+| Correo               | Make.com Custom Webhook → Gmail Sender                        |
+| Hosting backend      | DigitalOcean Droplet + nginx + Let's Encrypt                  |
+| Hosting frontend     | Vercel                                                        |
+
+## Arquitectura
+
+```
+[ Browser ] ─HTTPS─▶ [ Vercel: Next.js ] ─HTTPS─▶ [ DO Droplet: nginx → FastAPI ]
+                                                          ├─▶ Qdrant Cloud (vectores)
+                                                          ├─▶ OpenAI (chat / vision / embeddings)
+                                                          └─▶ Make.com webhook (email)
+```
+
+Tres agentes lógicos en el backend:
+
+- **AgenteExtraccion** — Ingesta, chunking y embeddings hacia Qdrant.
+- **AgenteRespuesta** — Búsqueda semántica + síntesis con LLM (RAG).
+- **AgentePlanRepaso** — Genera 4 sesiones espaciadas y opcionalmente las envía por correo.
 
 ## Estructura del repositorio
 
 ```
 mentor-ia-v2/
-├── CLAUDE.md                  Instrucciones globales para agentes de IA
-├── .claude/
-│   └── skills/                Skills personalizadas para Claude Code
-├── docs/
-│   ├── academic/              Documentación entregable a la profesora
-│   │   ├── Documento_Tecnico.md
-│   │   ├── Arquitectura_Multiagente.md
-│   │   ├── Modelo_Datos_Qdrant.md
-│   │   ├── Flujo_Interaccion_Usuario_Sistema.md
-│   │   ├── wireframes-frontend.md
-│   │   └── wireframes/        Imágenes PNG de wireframes
-│   └── specs/                 Specs técnicas que consumen los agentes
-│       ├── spec-backend.md
-│       ├── spec-frontend.md
-│       └── implementation-plan.md
-├── backend/                   FastAPI + Python (a construir)
-├── frontend/                  Next.js 16 + React 19 (a construir)
-└── README.md                  Este archivo
+├── backend/      Servicio FastAPI (Python 3.11 + uv + Docker)
+├── frontend/     Aplicación Next.js 16 (App Router, Turbopack)
+├── docs/         Especificaciones técnicas y documentación de diseño
+└── README.md
 ```
 
-## Para qué sirve cada carpeta
+## Ejecución local
 
-- **`docs/academic/`** — Documentos que lee la profesora para evaluar.
-  No los modifica el agente sin permiso explícito.
-- **`docs/specs/`** — Documentos que lee el agente (Claude Code,
-  Cursor) para construir el código. Cada spec describe qué hay que
-  construir, dónde y bajo qué reglas.
-- **`backend/`** — Código del backend FastAPI. El agente lo construye
-  siguiendo `docs/specs/spec-backend.md`.
-- **`frontend/`** — Código del frontend Next.js. El agente lo construye
-  siguiendo `docs/specs/spec-frontend.md`.
+**Backend**
 
-## Flujo de trabajo con el agente
+```bash
+cd backend
+cp .env.example .env   # rellenar OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY, MAKE_WEBHOOK_URL
+docker compose up -d --build
+curl http://localhost:8000/health
+```
 
-1. El estudiante abre Claude Code (o Cursor) en este repo.
-2. El agente lee primero `CLAUDE.md` (instrucciones globales).
-3. Para construir el backend, lee `docs/specs/spec-backend.md`.
-4. Para construir el frontend, lee `docs/specs/spec-frontend.md`.
-5. El plan de orden de implementación está en
-   `docs/specs/implementation-plan.md`.
+**Frontend**
 
-## Despliegue previsto
+```bash
+cd frontend
+pnpm install
+cp .env.local.example .env.local   # NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+pnpm dev
+```
 
-| Componente | Plataforma                                    |
-| ---------- | --------------------------------------------- |
-| Frontend   | Vercel (gratis)                               |
-| Backend    | DigitalOcean Droplet con Docker Compose       |
-| Vectorial  | Qdrant Cloud (tier gratuito 1 GB)             |
-| LLM/Embeddings | Google Gemini (`gemini-flash-latest`, `gemini-embedding-001` con `outputDimensionality=768`) |
-| OCR        | Google Cloud Vision (`DOCUMENT_TEXT_DETECTION`) |
-| Email      | Make.com Custom Webhook + Gmail Sender        |
+Aplicación en <http://localhost:3000>.
 
-## Lectura recomendada según rol
+## Variables de entorno
 
-- **Profesora evaluadora:** empezar por `docs/academic/Documento_Tecnico.md`.
-- **Desarrollador o agente que construye el sistema:** empezar por
-  `CLAUDE.md`, luego `docs/specs/implementation-plan.md`.
-- **Estudiante revisando el proyecto en sustentación:** la sección
-  *"Para defender en sustentación"* al final de cada `.md` académico.
+Plantilla completa en [`backend/.env.example`](backend/.env.example).
+Mínimo viable:
+
+```env
+OPENAI_API_KEY=sk-...
+QDRANT_URL=https://....cloud.qdrant.io
+QDRANT_API_KEY=...
+QDRANT_COLLECTION=mentor_ia_aprendizaje
+MAKE_WEBHOOK_URL=https://hook.eu2.make.com/...
+CORS_ORIGINS=["https://www.tu-dominio.com","http://localhost:3000"]
+```
+
+## Despliegue
+
+- **Backend:** Docker Compose en un Droplet Ubuntu 24.04, expuesto por nginx con TLS automático (Let's Encrypt).
+- **Frontend:** Vercel, Root Directory `frontend/`, build automático desde `main`.
+
+## Documentación
+
+- [`docs/specs/`](docs/specs/) — Especificaciones técnicas, plan de implementación, política de seguridad de dependencias.
+- [`docs/academic/`](docs/academic/) — Documento técnico, modelo de datos, arquitectura multiagente, wireframes.
+
+## Contexto
+
+Trabajo final de la asignatura *Administración de Proyectos de Software* — Tecnología en Desarrollo de Software, Universidad Tecnológica de Pereira (UTP).
+
+## Licencia
+
+Uso académico — UTP.
