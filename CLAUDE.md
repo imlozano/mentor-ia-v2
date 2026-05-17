@@ -276,6 +276,27 @@ eso:
 - El agente NO debe introducir librerías o patrones "porque están de
   moda" sin justificación técnica.
 
+### 8.1 Heurística RAG vs modelo (cómo demo-ar en vivo)
+
+El backend usa un **umbral de similitud coseno = 0.55** (`RAG_SCORE_THRESHOLD`).
+Si ningún chunk supera ese score, cae al **modelo base** sin inventar
+fuentes. Es comportamiento correcto; hay que saber demostrarlo.
+
+| Tipo de pregunta                                         | Resultado esperado                                          |
+| -------------------------------------------------------- | ----------------------------------------------------------- |
+| *"¿Qué dice el archivo X.pdf?"* / *"Explícame el archivo X"* | `origen: modelo` — la query es meta-archivo, no contenido.  |
+| *"¿Qué es la atención multi-cabeza?"* / *"¿Cómo funciona X concepto del paper?"* | `origen: rag` con `[Fuente N]` citada y score > 0.55. |
+
+Lo que decir en sustentación: *"El sistema solo cita fuentes cuando
+el embedding de la pregunta matchea con el de algún chunk indexado
+sobre umbral 0.55. Si la pregunta es meta (nombra el archivo en vez
+de preguntar por su contenido), el embedding no acerca chunks
+técnicos del documento, y el sistema cae al modelo base con badge
+claro. Es una salvaguarda contra alucinación de fuentes."*
+
+Para demo: tener preparadas 2 preguntas — una de cada tipo — sobre
+el mismo documento indexado, y mostrar los badges distintos.
+
 ## 9. Seguimiento del proyecto y ClickUp
 
 El avance real del proyecto se registra en ClickUp como herramienta
