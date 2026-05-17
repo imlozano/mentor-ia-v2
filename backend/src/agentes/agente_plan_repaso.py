@@ -7,7 +7,6 @@ from loguru import logger
 
 from src.agentes.agente_extraccion import AgenteExtraccion
 from src.models import PlanRepasoResponse, SesionPlan
-from src.services.gemini import GeminiService
 from src.services.make_webhook import MakeWebhookService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
@@ -19,13 +18,11 @@ class AgentePlanRepaso:
     def __init__(
         self,
         qdrant_client: QdrantService,
-        gemini_service: GeminiService,
         openai_service: OpenAIService,
         agente_extraccion: AgenteExtraccion,
         make_webhook: MakeWebhookService,
     ) -> None:
         self._qdrant = qdrant_client
-        self._gemini = gemini_service
         self._openai = openai_service
         self._agente_extraccion = agente_extraccion
         self._make_webhook = make_webhook
@@ -63,7 +60,7 @@ class AgentePlanRepaso:
         )
 
     async def _buscar_contexto(self, tema: str) -> str:
-        query_vector = await self._gemini.embed_query(tema)
+        query_vector = await self._openai.embed_query(tema)
         hits = await self._qdrant.query(vector=query_vector, limit=5)
         textos: list[str] = []
         for hit in hits:

@@ -45,7 +45,7 @@ usuario las contradice, el agente debe preguntar antes de proceder.
 | Estilos         | Tailwind CSS 4 + shadcn/ui sobre Radix Primitives       |
 | Backend         | FastAPI + Python 3.11+                                  |
 | Base vectorial  | Qdrant Cloud, colección `mentor_ia_aprendizaje`, 768 dim, COSINE |
-| Embeddings      | Google Gemini `gemini-embedding-2` con `outputDimensionality=768` (MRL, vectores renormalizados) — migrado desde `gemini-embedding-001` el 2026-05-15 por agotamiento de cuota free; ver §2.5 |
+| Embeddings      | OpenAI `text-embedding-3-large` con `dimensions=768` (MRL nativo, vectores renormalizados) — migrado desde Gemini el 2026-05-17 por agotamiento repetido de cuota free; ver §2.5 |
 | LLM             | OpenAI `gpt-4o-mini` (chat completions). Decisión documentada en §2.5. |
 | OCR             | OpenAI `gpt-4o-mini` (Vision multimodal sobre chat completions). Decisión documentada en §2.5. |
 | Email           | Make.com Custom Webhook + Gmail Sender                  |
@@ -106,12 +106,26 @@ mismo MRL→768 + renormalización). Esto requirió **borrar la colección
 Qdrant y re-indexar** los smoke docs (vectores 001 y 2 no son
 semánticamente comparables).
 
-**Riesgo conocido (plan B):** seguimos en tier gratuito de embeddings.
-Si en producción se vuelven a agotar los 1000 RPD del modelo 2, las
-opciones son: (a) activar billing en Google AI Studio, o (b) migrar
-embeddings también a OpenAI `text-embedding-3-large` (1536d con
-`dimensions=768`, top MTEB, ~USD 0.13/1M tokens). Implementar (b)
-requiere otra ronda de re-indexación de Qdrant.
+**Adenda 2026-05-17 (plan B activado):** `gemini-embedding-2` agotó
+cuota free 1000 RPD durante el despliegue a producción (DigitalOcean
++ Vercel). El healthcheck cada 30s + uso real consumió cuota en horas.
+Migración completa a OpenAI:
+
+- `OpenAIService.embed_query/embed_texts` con `text-embedding-3-large`
+  + parámetro `dimensions=768` (MRL nativo) + renormalización.
+- `GeminiService` eliminado por completo; `google-genai` removido de
+  `pyproject.toml`; `GEMINI_API_KEY` ya no se requiere.
+- `/health` ahora solo pingea Qdrant + OpenAI (sin `gemini_ok`).
+- Nueva ronda de **borrado de colección Qdrant + re-indexación** porque
+  los vectores de `gemini-embedding-2` y `text-embedding-3-large` no son
+  semánticamente comparables.
+- `Settings` añade `openai_embedding_model`, `openai_embedding_dimensions`.
+
+Para defender en sustentación: el tier gratuito de Gemini embeddings
+(1000 RPD) era incompatible con la frecuencia de healthchecks (cada
+30s × 2880 al día) + el uso real de RAG/plan/upload. OpenAI con
+créditos paga ofrece límites por minuto/día holgados para el alcance
+académico. Coste estimado: ~USD 0.13 por 1M tokens, despreciable.
 
 ## 3. Estructura del repositorio
 
@@ -207,19 +221,20 @@ en `.env.example` (que se crea como plantilla) y se leen en código vía
 **Backend (`backend/.env`):**
 
 ```
-GEMINI_API_KEY=...
 OPENAI_API_KEY=...
 QDRANT_URL=...
 QDRANT_API_KEY=...
 QDRANT_COLLECTION=mentor_ia_aprendizaje
 MAKE_WEBHOOK_URL=...
 BASE_DOCS_DIR=./data/ejemplos
-CORS_ORIGINS=http://localhost:3000,https://mentor-ia-sistema.vercel.app
+CORS_ORIGINS=["https://www.iamentor.tech","https://iamentor.tech","http://localhost:3000"]
 ```
 
-Nota: `GOOGLE_VISION_KEY_JSON_PATH` y la carpeta `credentials/` quedaron
-obsoletos tras la migración a OpenAI Vision (§2.5). Pueden eliminarse del
-repo y del Droplet.
+Notas:
+- `CORS_ORIGINS` debe ir como **JSON array** (con corchetes y comillas dobles),
+  no CSV. `pydantic-settings` 2.x intenta `json.loads()` antes de los validators.
+- `GEMINI_API_KEY` y `GOOGLE_VISION_KEY_JSON_PATH` quedaron obsoletos tras
+  la migración total a OpenAI (§2.5). Pueden eliminarse del repo y del Droplet.
 
 **Frontend (`frontend/.env.local`):**
 

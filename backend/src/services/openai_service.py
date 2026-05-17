@@ -1,23 +1,27 @@
 """Wrapper del SDK openai para Mentor IA.
 
-Sustituye a Gemini para LLM y OCR multimodal por restricción de cuota del
-tier gratuito de Gemini (20 RPD). Embeddings siguen en Gemini (ver §2.5 de
-CLAUDE.md).
+Sustituye completamente a Gemini tras la activación del plan B descrito en
+CLAUDE.md §2.5 (gemini-embedding-2 también agotó la cuota free de 1000 RPD
+durante el despliegue inicial). Ahora absolutamente todo el LLM, OCR y
+embeddings va por OpenAI.
 
-Tres operaciones públicas:
+Operaciones públicas:
 - generate(prompt, system?): chat completion en gpt-4o-mini.
-- extract_text_from_image(bytes, mime): OCR multimodal con la misma firma
-  que tenía GeminiVisionService para minimizar cambios en los agentes.
-- extract_text_from_pdf_page(bytes): alias de extract_text_from_image para
-  páginas de PDF renderizadas a PNG.
-- ping(timeout): models.retrieve, sin consumir tokens.
+- extract_text_from_image(bytes, mime): OCR multimodal.
+- extract_text_from_pdf_page(bytes): alias para páginas PDF renderizadas.
+- embed_query(text) / embed_texts([text]): embeddings con
+  text-embedding-3-large recortado a 768 dims (MRL nativo) y renormalizado
+  a norma unitaria — compatible con la colección Qdrant COSINE existente.
+- ping(timeout): models.retrieve del chat model (no consume tokens).
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import math
 import re
+from typing import Sequence
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -110,6 +114,45 @@ class OpenAIService:
     async def extract_text_from_pdf_page(self, image_bytes: bytes) -> str:
         return await self.extract_text_from_image(image_bytes, mime="image/png")
 
+    # ----- Embeddings -----
+
+    async def embed_query(self, text: str) -> list[float]:
+        vectors = await self.embed_texts([text])
+        return vectors[0]
+
+    async def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+
+        attempts = 3
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await self._client.embeddings.create(
+                    model=self._settings.openai_embedding_model,
+                    input=list(texts),
+                    dimensions=self._settings.openai_embedding_dimensions,
+                )
+                # text-embedding-3-* con `dimensions` truncado (MRL) NO
+                # garantiza norma unitaria; renormalizamos para preservar la
+                # propiedad que Qdrant COSINE espera.
+                return [self._normalize(list(item.embedding)) for item in response.data]
+            except (RateLimitError, APITimeoutError, APIError) as exc:
+                last_exc = exc
+                if attempt >= attempts:
+                    raise
+                wait_s = self._retry_wait_seconds(str(exc), attempt)
+                logger.warning(
+                    "openai embeddings transient error; reintento {}/{} en {}s",
+                    attempt,
+                    attempts,
+                    wait_s,
+                )
+                await asyncio.sleep(wait_s)
+
+        assert last_exc is not None
+        raise last_exc
+
     # ----- Health -----
 
     async def ping(self, timeout: float = 2.0) -> bool:
@@ -128,6 +171,13 @@ class OpenAIService:
         await self._client.close()
 
     # ----- Internos -----
+
+    @staticmethod
+    def _normalize(vec: list[float]) -> list[float]:
+        norm = math.sqrt(sum(x * x for x in vec))
+        if norm == 0.0:
+            return vec
+        return [x / norm for x in vec]
 
     @staticmethod
     def _retry_wait_seconds(message: str, attempt: int) -> int:

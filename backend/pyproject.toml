@@ -19,7 +19,6 @@ dependencies = [
     "pypdf>=6.0",
     "pypdfium2>=4.30",
     "qdrant-client>=1.12",
-    "google-genai>=0.3",
     "openai>=1.50,<2.0",
     "loguru>=0.7",
     "python-dotenv>=1.0",

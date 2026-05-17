@@ -24,7 +24,6 @@ from src.models import (
     QueryResponse,
     UploadResponse,
 )
-from src.services.gemini import GeminiService
 from src.services.make_webhook import MakeWebhookService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
@@ -42,24 +41,20 @@ async def lifespan(app: FastAPI):
     setup_logging()
     settings = get_settings()
 
-    app.state.gemini = GeminiService(settings)
     app.state.openai = OpenAIService(settings)
     app.state.qdrant = QdrantService(settings)
     app.state.make = MakeWebhookService(settings)
     app.state.agente_extraccion = AgenteExtraccion(
         qdrant_client=app.state.qdrant,
-        gemini_service=app.state.gemini,
         openai_service=app.state.openai,
         settings=settings,
     )
     app.state.agente_respuesta = AgenteRespuesta(
         qdrant_client=app.state.qdrant,
-        gemini_service=app.state.gemini,
         openai_service=app.state.openai,
     )
     app.state.agente_plan_repaso = AgentePlanRepaso(
         qdrant_client=app.state.qdrant,
-        gemini_service=app.state.gemini,
         openai_service=app.state.openai,
         agente_extraccion=app.state.agente_extraccion,
         make_webhook=app.state.make,
@@ -142,16 +137,14 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
-    # Verificamos Qdrant, Gemini (embeddings) y OpenAI (chat+vision) en
-    # paralelo con timeout 2s cada uno. /health NUNCA falla por dependencias
-    # caídas: refleja estado real para que el frontend muestre degradación.
+    # Verificamos Qdrant y OpenAI (chat + vision + embeddings) en paralelo
+    # con timeout 2s cada uno. /health NUNCA falla por dependencias caídas:
+    # refleja estado real para que el frontend muestre degradación.
     qdrant: QdrantService = request.app.state.qdrant
-    gemini: GeminiService = request.app.state.gemini
     openai: OpenAIService = request.app.state.openai
 
-    qdrant_ok, gemini_ok, openai_ok = await asyncio.gather(
+    qdrant_ok, openai_ok = await asyncio.gather(
         qdrant.ping(timeout=2.0),
-        gemini.ping(timeout=2.0),
         openai.ping(timeout=2.0),
     )
 
@@ -159,7 +152,6 @@ async def health(request: Request) -> HealthResponse:
         status="ok",
         version=VERSION,
         qdrant_ok=qdrant_ok,
-        gemini_ok=gemini_ok,
         openai_ok=openai_ok,
     )
 

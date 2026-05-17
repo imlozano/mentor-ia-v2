@@ -20,7 +20,6 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str
     qdrant_ok: bool
-    gemini_ok: bool
     openai_ok: bool
 
 

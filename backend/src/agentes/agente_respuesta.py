@@ -3,7 +3,6 @@ from __future__ import annotations
 from loguru import logger
 
 from src.models import Fuente, QueryResponse
-from src.services.gemini import GeminiService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 
@@ -12,11 +11,9 @@ class AgenteRespuesta:
     def __init__(
         self,
         qdrant_client: QdrantService,
-        gemini_service: GeminiService,
         openai_service: OpenAIService,
     ) -> None:
         self._qdrant = qdrant_client
-        self._gemini = gemini_service
         self._openai = openai_service
 
     async def responder(
@@ -25,7 +22,7 @@ class AgenteRespuesta:
         top_k: int = 5,
         umbral_score: float = 0.55,
     ) -> QueryResponse:
-        vector = await self._gemini.embed_query(pregunta)
+        vector = await self._openai.embed_query(pregunta)
         hits = await self._qdrant.query(vector=vector, limit=top_k)
         fuentes_filtradas = [hit for hit in hits if (hit.score or 0.0) >= umbral_score]
 

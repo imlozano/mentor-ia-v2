@@ -11,7 +11,6 @@ from loguru import logger
 import pypdfium2 as pdfium
 from qdrant_client.http import models as qmodels
 
-from src.services.gemini import GeminiService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import Settings
@@ -27,12 +26,10 @@ class AgenteExtraccion:
     def __init__(
         self,
         qdrant_client: QdrantService,
-        gemini_service: GeminiService,
         openai_service: OpenAIService,
         settings: Settings,
     ) -> None:
         self._qdrant = qdrant_client
-        self._gemini = gemini_service
         self._openai = openai_service
         self._settings = settings
         self._id_namespace = uuid.NAMESPACE_URL
@@ -107,7 +104,7 @@ class AgenteExtraccion:
         )
 
     async def _embed_y_upsert(self, chunks: list[str], source_path: str, tipo: str) -> int:
-        vectors = await self._gemini.embed_texts(chunks)
+        vectors = await self._openai.embed_texts(chunks)
         now = datetime.now(timezone.utc).isoformat()
         source_name = Path(source_path).name
 
@@ -120,7 +117,7 @@ class AgenteExtraccion:
                 "nombre_archivo": source_name,
                 "tipo_fuente": tipo,
                 "chunk_index": idx,
-                "embedding_model": self._settings.embedding_model,
+                "embedding_model": self._settings.openai_embedding_model,
                 "embedding_dim": self._settings.embedding_dim,
                 "schema_version": "1.0",
                 "created_at": now,

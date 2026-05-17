@@ -38,8 +38,7 @@ export function StatusIndicator() {
       try {
         const health = await getHealth();
         if (!mounted) return;
-        const allOk =
-          health.qdrant_ok && health.gemini_ok && health.openai_ok;
+        const allOk = health.qdrant_ok && health.openai_ok;
         setState(allOk ? "online" : "partial");
       } catch {
         if (!mounted) return;

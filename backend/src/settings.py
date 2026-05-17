@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # --- Servicios externos ---
-    gemini_api_key: str
     openai_api_key: str
     qdrant_url: str
     qdrant_api_key: str
@@ -21,19 +20,18 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # --- Modelos Gemini (embeddings) ---
-    # Migrado a gemini-embedding-2 el 2026-05-15 porque gemini-embedding-001
-    # del tier gratuito alcanzó el límite RPD 1000 durante las pruebas E2E.
-    # gemini-embedding-2 tiene bucket de cuota separado y MRL nativo a 768.
-    # Si vuelve a quedar limitante en producción, ver CLAUDE.md §2.5 plan B
-    # (text-embedding-3-large de OpenAI).
-    embedding_model: str = "gemini-embedding-2"
-    embedding_output_dimensionality: int = 768
-    embedding_dim: int = 768
-
-    # --- Modelos OpenAI (LLM + OCR multimodal) ---
+    # --- Modelos OpenAI ---
+    # Plan B activado el 2026-05-17 (gemini-embedding-2 también agotó cuota
+    # free 1000 RPD durante despliegue inicial). Ver CLAUDE.md §2.5.
+    # text-embedding-3-large soporta MRL nativo vía parámetro `dimensions`;
+    # OpenAIService renormaliza a norma unitaria para preservar COSINE.
     openai_chat_model: str = "gpt-4o-mini"
     openai_vision_model: str = "gpt-4o-mini"
+    openai_embedding_model: str = "text-embedding-3-large"
+    openai_embedding_dimensions: int = 768
+
+    # Dimensión que se guarda en el payload Qdrant para auditoría.
+    embedding_dim: int = 768
 
     # --- Chunking ---
     chunk_max_chars: int = 900

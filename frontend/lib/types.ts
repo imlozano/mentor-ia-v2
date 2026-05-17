@@ -61,7 +61,6 @@ export interface HealthResponse {
   status: "ok";
   version: string;
   qdrant_ok: boolean;
-  gemini_ok: boolean;
   openai_ok: boolean;
 }
 
