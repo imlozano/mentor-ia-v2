@@ -5,8 +5,7 @@
 > layout, los wireframes pantalla por pantalla (con imágenes), el patrón
 > de estados estandarizados y el diseño responsive.
 >
-> Versión: 2.0 · Fecha: 2026-05-11.
-> Tarea ClickUp: Diseño de wireframes del frontend.
+> Versión: 2.1 · Fecha: 2026-05-17.
 
 ---
 
@@ -23,7 +22,7 @@
 
 > **Nota sobre los wireframes.** Las imágenes incluidas en este documento
 > representan el frontend tal como está desplegado en
-> [mentor-ia-sistema.vercel.app](https://mentor-ia-sistema.vercel.app/) a
+> [www.iamentor.tech](https://www.iamentor.tech/) a
 > la fecha de esta entrega. Los datos visibles dentro de los wireframes
 > (nombres de archivos, número de chunks, etc.) son **ilustrativos** y no
 > corresponden a documentos reales indexados en el momento de captura.
@@ -188,7 +187,7 @@ Repaso** en modo `Tema`:
 
 **Comportamiento:**
 
-- Al generar, se hacen cuatro llamadas a Gemini (una por sesión: D+1,
+- Al generar, se hacen cuatro llamadas a OpenAI `gpt-4o-mini` (una por sesión: D+1,
   D+7, D+14, D+30).
 - Si hay email, se envía el plan por Make.com en HTML.
 - Sin email, el plan solo aparece en la timeline en pantalla.
@@ -203,7 +202,7 @@ Repaso** en modo `Tema`:
   - Dropzone con borde discontinuo: *"Arrastra una imagen aquí"* /
     *"PNG, JPG, JPEG"*.
   - Botón secundario *"Seleccionar archivo"*.
-  - Badges informativos: *"Máx. 10 MB"* y *"Google Vision AI"*.
+  - Badges informativos: *"Máx. 10 MB"* y *"OpenAI Vision AI"*.
 
 - **Columna derecha (resultado):**
   - Textarea de solo lectura con el texto extraído.
@@ -276,7 +275,7 @@ sección 6).
 ## 7. Bug visual conocido
 
 En el componente
-[`study-assistant.tsx`](../mentor-ia-sistema/mentor-ia-frontend/components/study-assistant.tsx)
+[`study-assistant.tsx`](../../frontend/components/study-assistant.tsx)
 se imprime accidentalmente el texto `score: ... pregunta` en la cabecera
 de fuentes de cada respuesta. Esto se debe a una concatenación
 incorrecta entre `msg.response?.fuentes[i].score` y
@@ -308,14 +307,14 @@ Cuatro puntos clave sobre el diseño del frontend:
 1. **El frontend desplegado coincide con los wireframes presentados.**
    Las tres imágenes incluidas en este documento corresponden al
    estado real de
-   [mentor-ia-sistema.vercel.app](https://mentor-ia-sistema.vercel.app/).
-   No hay pantallas "hipotéticas" sin implementación. Si la profesora
-   abre el frontend, encontrará las tres sub-pestañas, el indicador
-   "Online", las sugerencias hardcoded, el dropzone de OCR y el
-   formulario del plan, en ese orden.
+   [www.iamentor.tech](https://www.iamentor.tech/).
+   No hay pantallas "hipotéticas" sin implementación. Al abrir el
+   frontend se encuentran las tres sub-pestañas, el indicador
+   "Online" (con polling real a `/health`), las sugerencias hardcoded,
+   el dropzone de OCR y el formulario del plan, en ese orden.
 
 2. **El stack frontend está alineado con los requisitos.** Next.js
-   16.2.4 + React 19 + TypeScript 5 + Tailwind 4 + shadcn/ui, según el
+   16.2.6 + React 19 + TypeScript 5 + Tailwind 4 + shadcn/ui, según el
    documento de requerimientos. La versión exacta se verifica en
    `package.json`.
 

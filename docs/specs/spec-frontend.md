@@ -289,7 +289,7 @@ Footer: `Total: N chunks` · `Formatos: ...` · `Estado: Indexados ✓`.
 Layout split horizontal en desktop (`md+`), apilado en mobile:
 
 - **Izquierda:** dropzone (`border-dashed`), botón "Seleccionar archivo",
-  badges informativos "Máx. 10 MB" y "Google Vision AI".
+  badges informativos "Máx. 10 MB" y "OpenAI Vision AI".
 - **Derecha:** textarea de solo lectura con `texto` del response.
   Debajo, dos botones: `Copiar texto` (al portapapeles) y
   `Indexar documento` (genera un `.txt` con el contenido y llama a

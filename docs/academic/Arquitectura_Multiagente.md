@@ -5,8 +5,7 @@
 > son sus responsabilidades, cómo se coordinan a través del backend y qué
 > limitaciones tiene el diseño actual.
 >
-> Versión: 1.0 · Fecha: 2026-05-11.
-> Tarea ClickUp: Diseño de la arquitectura multiagente.
+> Versión: 1.1 · Fecha: 2026-05-17.
 
 ---
 
@@ -55,8 +54,8 @@ planes no obliga a tocar el código de ingesta.
 
 ### 2.2 Testabilidad aislada
 
-Cada agente se puede probar de forma independiente con mocks de Qdrant,
-Gemini o Vision. Si los tres comportamientos vivieran en una sola clase
+Cada agente se puede probar de forma independiente con mocks de Qdrant
+o de OpenAI. Si los tres comportamientos vivieran en una sola clase
 gigante, cada test requeriría montar todo el stack de dependencias.
 
 ### 2.3 Evolución incremental
@@ -118,23 +117,25 @@ convención) o un documento individual recién subido.
 1. **Lectura de fuentes.** Recorre el directorio y clasifica cada archivo
    por extensión (`.pdf`, `.txt`, `.md`, `.png`, `.jpg`, `.jpeg`).
 2. **Extracción de texto.**
-   - PDF: usa `pypdf.PdfReader` y concatena `page.extract_text()` de cada
-     página.
+   - PDF con capa de texto: usa `pypdf.PdfReader` y concatena
+     `page.extract_text()` de cada página.
+   - PDF escaneado (umbral de caracteres extraídos por debajo de 50):
+     renderiza cada página a PNG con `pypdfium2` y aplica OCR
+     multimodal con OpenAI `gpt-4o-mini` Vision.
    - TXT/MD: lee con `open(path, encoding="utf-8").read()`.
-   - Imágenes: llama a Google Cloud Vision con
-     `DOCUMENT_TEXT_DETECTION` y obtiene `fullTextAnnotation.text`.
+   - Imágenes (PNG/JPG): codifica en base64 y llama a OpenAI
+     `gpt-4o-mini` Vision con prompt de OCR.
 3. **Chunking.** Trocea el texto en bloques de 900 caracteres con 150 de
    solape, hasta un máximo de 100 chunks por documento (ver
    [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md) para la
    justificación).
-4. **Generación de embeddings.** Llama a la API de Gemini
-   (`gemini-embedding-001` con `outputDimensionality=768`) por lotes y
-   renormaliza cada vector resultante a norma 1.
-5. **Upsert en Qdrant.** Crea los `PointStruct` con `id`, `vector` y
-   `payload`, y los inserta en la colección.
+4. **Generación de embeddings.** Llama a OpenAI
+   `text-embedding-3-large` con `dimensions=768` (MRL nativo) por lotes
+   y renormaliza cada vector resultante a norma 1.
+5. **Upsert en Qdrant.** Crea los `PointStruct` con `id` (UUIDv5
+   determinístico), `vector` y `payload`, y los inserta en la colección.
 
-**Dependencias externas:** Google Cloud Vision, Google Gemini Embeddings,
-Qdrant.
+**Dependencias externas:** OpenAI (vision + embeddings), Qdrant.
 
 ### 4.2 `AgenteRespuesta`
 
@@ -150,24 +151,24 @@ origen.
 
 **Subtareas internas:**
 
-1. **Embedding de la pregunta.** Llama a `gemini-embedding-001` con
-   `outputDimensionality=768` para obtener el vector de la consulta,
-   renormalizado a norma 1.
+1. **Embedding de la pregunta.** Llama a OpenAI
+   `text-embedding-3-large` con `dimensions=768` para obtener el vector
+   de la consulta, renormalizado a norma 1.
 2. **Búsqueda semántica.** Llama a `Qdrant.query_points` con el vector
    de la pregunta y obtiene los `top_k` chunks más similares.
 3. **Filtrado por score.** Solo considera fuentes que superen un umbral
-   mínimo de similitud (configurable). Si ningún chunk supera el umbral,
-   `origen = "modelo"` y la respuesta se genera sin RAG.
+   mínimo de similitud (`RAG_SCORE_THRESHOLD = 0.55`, configurable). Si
+   ningún chunk supera el umbral, `origen = "modelo"` y la respuesta se
+   genera sin RAG. Esta es la salvaguarda contra alucinación de citas.
 4. **Construcción del prompt.** Concatena la pregunta con los chunks
-   recuperados como contexto.
-5. **Generación de respuesta.** Llama a Gemini (`gemini-flash-latest`)
-   con el prompt construido.
-6. **Normalización.** Convierte la respuesta a string (a veces Gemini
-   devuelve listas de partes) y arma el objeto final con fuentes y
-   metadatos.
+   recuperados como contexto e instrucciones de citación `[Fuente N]`.
+5. **Generación de respuesta.** Llama a OpenAI `gpt-4o-mini` con el
+   prompt construido.
+6. **Armado de respuesta.** Compone el objeto final con texto,
+   `origen`, lista de fuentes (archivo, chunk_index, score, excerpt) y
+   detalle de origen.
 
-**Dependencias externas:** Google Gemini Embeddings, Google Gemini LLM,
-Qdrant.
+**Dependencias externas:** OpenAI (chat + embeddings), Qdrant.
 
 ### 4.3 `AgentePlanRepaso`
 
@@ -191,17 +192,18 @@ email, además se dispara el envío vía Make.com.
 2. **Búsqueda de contexto.** Para cada una de las cuatro sesiones, busca
    en Qdrant los chunks relevantes al tema. Esto permite que el plan
    esté anclado al material real del estudiante.
-3. **Generación de cada sesión.** Hace cuatro llamadas a Gemini, una por
-   sesión, con prompts diferenciados (la sesión D+1 enfatiza repaso
-   inicial; la D+30 enfatiza consolidación final).
+3. **Generación de cada sesión.** Hace cuatro llamadas a OpenAI
+   `gpt-4o-mini`, una por sesión, con prompts diferenciados (la sesión
+   D+1 enfatiza repaso inicial; la D+30 enfatiza consolidación final).
+   Si una llamada falla, el agente registra el incidente y devuelve una
+   descripción de fallback local para no romper el plan completo.
 4. **Cálculo de fechas.** A partir de `fecha_inicio`, suma 1, 7, 14 y 30
    días para construir el cronograma.
 5. **Envío por email.** Si hay email, hace un `POST` al webhook de
    Make.com con el payload completo del plan. Make.com itera las
    sesiones, las formatea como HTML y las envía con Gmail Sender.
 
-**Dependencias externas:** Google Gemini Embeddings, Google Gemini LLM,
-Qdrant, Make.com.
+**Dependencias externas:** OpenAI (chat + embeddings), Qdrant, Make.com.
 
 ---
 
@@ -231,28 +233,26 @@ flowchart TB
     end
 
     subgraph ExternalLayer["Capa de servicios externos"]
-        GV[Google Cloud Vision]
-        GE[Google Gemini]
+        OAI[OpenAI gpt-4o-mini<br/>chat + vision + embeddings]
         MK[Make.com + Gmail]
     end
 
     User --> FE
-    FE -->|HTTP/JSON| BE
+    FE -->|HTTPS/JSON| BE
 
     BE --> AE
     BE --> AR
     BE --> APR
 
     AE --> FS
-    AE --> GV
-    AE --> GE
+    AE --> OAI
     AE --> QD
 
-    AR --> GE
+    AR --> OAI
     AR --> QD
 
     APR --> AE
-    APR --> GE
+    APR --> OAI
     APR --> QD
     APR --> MK
 
@@ -281,26 +281,29 @@ sequenceDiagram
     participant FE as Frontend
     participant BE as Backend FastAPI
     participant AE as AgenteExtraccion
-    participant GE as Gemini Embeddings
-    participant GV as Google Vision
+    participant OAI as OpenAI<br/>(chat + vision + embeddings)
     participant QD as Qdrant
 
     U->>FE: Sube archivo (PDF/TXT/MD/img)
     FE->>BE: POST /upload-document
     BE->>BE: Valida extensión y guarda en disco
-    BE->>AE: ingestar_documentos(data/ejemplos)
-    alt Es PDF
-        AE->>AE: PdfReader.extract_text por página
-    else Es imagen
-        AE->>GV: DOCUMENT_TEXT_DETECTION
-        GV-->>AE: texto extraído
+    BE->>AE: ingestar_documento(path)
+    alt Es PDF con capa de texto
+        AE->>AE: pypdf.extract_text por página
+    else Es PDF escaneado (avg chars < 50)
+        AE->>AE: render página a PNG con pypdfium2
+        AE->>OAI: chat.completions con imagen + prompt OCR
+        OAI-->>AE: texto extraído
+    else Es imagen (PNG/JPG)
+        AE->>OAI: chat.completions con imagen + prompt OCR
+        OAI-->>AE: texto extraído
     else Es TXT/MD
         AE->>AE: open(utf-8).read()
     end
     AE->>AE: Chunking 900/150 (max 100)
-    AE->>GE: batchEmbedContents(chunks)
-    GE-->>AE: vectores 768d
-    AE->>QD: upsert PointStruct[]
+    AE->>OAI: embeddings.create(input, dimensions=768)
+    OAI-->>AE: vectores 768d (renormalizados)
+    AE->>QD: upsert PointStruct[] con UUIDv5
     QD-->>AE: ack
     AE-->>BE: total chunks indexados
     BE-->>FE: respuesta JSON
@@ -315,28 +318,28 @@ sequenceDiagram
     participant FE as Frontend
     participant BE as Backend FastAPI
     participant AR as AgenteRespuesta
-    participant GE as Gemini
+    participant OAI as OpenAI
     participant QD as Qdrant
 
     U->>FE: Escribe pregunta
     FE->>BE: POST /query
     BE->>AR: responder(pregunta)
-    AR->>GE: embedContent(pregunta)
-    GE-->>AR: vector 768d
-    AR->>QD: query_points(vector, top_k)
+    AR->>OAI: embeddings.create(pregunta, dimensions=768)
+    OAI-->>AR: vector 768d
+    AR->>QD: query_points(vector, top_k=5)
     QD-->>AR: chunks similares con score
-    AR->>AR: Filtra por umbral de score
-    alt Hay fuentes con score suficiente
-        AR->>GE: generateContent(prompt + contexto RAG)
-        GE-->>AR: respuesta
+    AR->>AR: Filtra por umbral 0.55
+    alt Hay fuentes con score >= 0.55
+        AR->>OAI: chat.completions(prompt + contexto RAG)
+        OAI-->>AR: respuesta
         AR-->>BE: { respuesta, origen=rag, fuentes }
     else Sin fuentes suficientes
-        AR->>GE: generateContent(prompt sin contexto)
-        GE-->>AR: respuesta
+        AR->>OAI: chat.completions(prompt sin contexto)
+        OAI-->>AR: respuesta
         AR-->>BE: { respuesta, origen=modelo, fuentes=[] }
     end
     BE-->>FE: JSON con respuesta y fuentes
-    FE-->>U: burbuja de chat con badges de fuentes
+    FE-->>U: burbuja de chat con badge de origen
 ```
 
 ### 6.3 Flujo: generar plan de repaso
@@ -348,7 +351,7 @@ sequenceDiagram
     participant BE as Backend FastAPI
     participant APR as AgentePlanRepaso
     participant AE as AgenteExtraccion
-    participant GE as Gemini
+    participant OAI as OpenAI
     participant QD as Qdrant
     participant MK as Make.com
 
@@ -359,13 +362,13 @@ sequenceDiagram
         APR->>AE: ingestar_documento(archivo)
         AE->>QD: upsert chunks
     end
-    APR->>GE: embedContent(tema)
-    GE-->>APR: vector
-    APR->>QD: query_points(vector, top_k)
+    APR->>OAI: embeddings.create(tema, dimensions=768)
+    OAI-->>APR: vector
+    APR->>QD: query_points(vector, top_k=5)
     QD-->>APR: chunks contexto
     loop 4 sesiones (D+1, D+7, D+14, D+30)
-        APR->>GE: generateContent(prompt sesión N)
-        GE-->>APR: contenido sesión N
+        APR->>OAI: chat.completions(prompt sesión N)
+        OAI-->>APR: contenido sesión N
     end
     APR->>APR: Calcula fechas a partir de fecha_inicio
     opt Si hay email
@@ -404,10 +407,10 @@ Redis Streams, Celery):
 
 El costo de este patrón es que no es escalable a múltiples instancias del
 backend con balanceador de carga. En ese escenario, dos peticiones
-concurrentes que toquen la misma colección Qdrant podrían producir
-condiciones de carrera al re-indexar el mismo documento (porque los
-`point_id` actuales no son idempotentes; ver
-[`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md)).
+concurrentes para re-indexar el mismo documento simplemente sobrescribirían
+los mismos puntos en Qdrant (los `point_id` son idempotentes vía UUIDv5,
+ver [`Modelo_Datos_Qdrant.md`](./Modelo_Datos_Qdrant.md) §4), pero
+duplicarían el cómputo de embeddings.
 
 Para el alcance académico de instancia única, este compromiso es
 aceptable.
@@ -432,9 +435,13 @@ Limitaciones reconocidas, ordenadas por relevancia:
    un entorno con muchos usuarios concurrentes esto degradaría la
    experiencia. La solución sería introducir una cola (Celery + Redis),
    pero está fuera del alcance académico.
-4. **No hay reintentos automáticos.** Si Gemini falla en la sesión D+14
-   del plan, el endpoint devuelve 500 y se pierden las tres sesiones
-   anteriores ya generadas. Falta un patrón de fallback o retry.
+4. **Reintentos limitados.** `OpenAIService.generate` reintenta con
+   backoff exponencial frente a `RateLimitError`/`APITimeoutError`
+   (hasta 3 intentos), y `AgentePlanRepaso` tiene fallback local para
+   no romper el plan completo si una sesión falla. Pero no hay retry
+   automático entre peticiones distintas: si el sistema externo está
+   degradado durante minutos, las peticiones individuales fallan con
+   503.
 5. **El sistema asume un único usuario.** No hay aislamiento entre
    "sesiones" de uso. Si dos personas usan el mismo despliegue al
    tiempo, comparten todo el contenido indexado en Qdrant.
@@ -479,4 +486,4 @@ Cuatro puntos clave que deben quedar claros al exponer este documento:
 
 ---
 
-_Última actualización: 2026-05-11._
+_Última actualización: 2026-05-17._

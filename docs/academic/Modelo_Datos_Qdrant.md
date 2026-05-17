@@ -6,8 +6,7 @@
 > limitaciones identificadas, junto con un diseño propuesto de mejora
 > documentado como trabajo futuro.
 >
-> Versión: 2.0 · Fecha: 2026-05-11.
-> Tarea ClickUp: Modelado del esquema de base de datos vectorial.
+> Versión: 3.0 · Fecha: 2026-05-17.
 
 ---
 
@@ -27,21 +26,21 @@
 
 La siguiente tabla resume el estado actual del modelo de datos vectorial
 en el sistema, tal como está implementado en
-`mentor-ia-aprendizaje/src/embeddings.py` y
-`mentor-ia-aprendizaje/src/agentes/agente_extraccion.py`.
+`backend/src/services/openai_service.py` y
+`backend/src/agentes/agente_extraccion.py`.
 
 | Aspecto                       | Valor actual                                                            |
 | ----------------------------- | ----------------------------------------------------------------------- |
 | Colección                     | `mentor_ia_aprendizaje` (configurable vía env `QDRANT_COLLECTION`)       |
 | Dimensión del vector          | 768                                                                     |
 | Distancia                     | COSINE                                                                  |
-| Modelo de embeddings          | `gemini-embedding-001` (Google Gemini) con `outputDimensionality=768` y renormalización |
+| Modelo de embeddings          | OpenAI `text-embedding-3-large` con `dimensions=768` (MRL nativo + renormalización) |
 | Tamaño de chunk               | 900 caracteres                                                          |
 | Solape entre chunks           | 150 caracteres                                                          |
 | Máximo de chunks por documento | 100                                                                    |
-| Tipos de fuente soportados    | PDF (`pypdf`), imagen (Google Vision OCR), texto plano (`.txt`/`.md`)   |
-| Identificador del punto       | `uuid.uuid4().int >> 64` (entero 64-bit aleatorio)                      |
-| Índices de payload            | Ninguno                                                                 |
+| Tipos de fuente soportados    | PDF (`pypdf`), PDF escaneado (`pypdfium2` + OpenAI Vision), imagen PNG/JPG (OpenAI Vision), texto plano (`.txt`/`.md`) |
+| Identificador del punto       | UUIDv5 determinístico desde `source_path \| chunk_index`                |
+| Índices de payload            | Ninguno (búsquedas son globales sin filtros activos)                    |
 | Filtros aplicados en búsqueda | Ninguno (búsqueda global sobre toda la colección)                       |
 
 El sistema está diseñado como instancia única para un solo usuario. No
@@ -69,36 +68,34 @@ client.create_collection(
 
 ### 2.2 Justificación de la dimensión 768
 
-La dimensión 768 es una **decisión de diseño anclada al sistema**,
-no una imposición del modelo actual. Originalmente venía dada por
-`text-embedding-004` (que producía nativamente vectores de 768 dim),
-pero tras la deprecación de ese modelo el sistema migró a
-`gemini-embedding-001`, cuya salida nativa es de 3072 dimensiones. La
-dimensión 768 se conserva mediante el parámetro
-`outputDimensionality=768`, que aplica **Matryoshka Representation
-Learning (MRL)** para truncar el vector preservando su calidad
-semántica.
+La dimensión 768 es una **decisión de diseño anclada al sistema** que
+se preservó a lo largo de tres migraciones de modelo de embeddings
+(ver [`Documento_Tecnico.md`](./Documento_Tecnico.md) §6.7 para la
+cronología). Hoy el modelo es OpenAI `text-embedding-3-large`, cuya
+salida nativa es de 3072 dimensiones; la dimensión 768 se conserva
+mediante el parámetro `dimensions=768`, que aplica **Matryoshka
+Representation Learning (MRL)** para truncar el vector preservando su
+calidad semántica.
 
 Mantener 768 (en lugar de migrar a 3072 nativos) responde a tres
 razones: compatibilidad con la colección Qdrant ya configurada,
 eficiencia operativa (vectores 4× más pequeños) y calidad equivalente
-gracias a MRL. La justificación completa de esta decisión está en
-[`Documento_Tecnico.md`](./Documento_Tecnico.md) sección 6.7.
+gracias a MRL.
 
-Esto tiene una consecuencia importante de diseño: la dimensión está
-acoplada a la **configuración** del modelo de embeddings. Si en el
-futuro se quisiera migrar a un modelo diferente (por ejemplo, OpenAI
-`text-embedding-3-small` con 1536 dimensiones), no bastaría con
-cambiar la llamada al API: habría que crear una colección nueva con la
-dimensión correcta y re-indexar todo el corpus. Esta es una de las
-razones para documentar `embedding_model` y `embedding_dim` en el
-payload (ver sección 6).
+Esto tiene una consecuencia de diseño importante: la dimensión está
+acoplada a la **configuración** del modelo de embeddings. Cambiar a un
+modelo con `dimensions` no soportadas o a otra familia obligaría a
+borrar la colección y re-indexar el corpus. Por eso el payload incluye
+`embedding_model` y `embedding_dim` (ver §4): permiten auditar con qué
+modelo se generó cada vector y planificar migraciones futuras.
 
 **Nota operativa.** Tras truncar con MRL, los vectores no quedan
-normalizados a norma 1 (se observa empíricamente norma ≈ 0.57). Como
-la métrica COSINE en Qdrant trabaja idealmente sobre vectores
-unitarios, el wrapper `services/gemini.py` aplica una renormalización
-explícita antes de upsertear.
+normalizados a norma 1 (efecto observado tanto en Gemini como en
+OpenAI). Como la métrica COSINE en Qdrant trabaja idealmente sobre
+vectores unitarios, `OpenAIService.embed_texts` aplica una
+renormalización explícita antes de devolver los vectores. Sin ese
+paso, la métrica COSINE se degrada y los scores de búsqueda se vuelven
+inestables.
 
 ### 2.3 Justificación de la distancia COSINE
 
@@ -108,13 +105,14 @@ deseable porque:
 
 - Los embeddings semánticos codifican el significado en la **dirección**
   del vector, no en su tamaño.
-- COSINE es la métrica recomendada explícitamente por la documentación
-  de Google Gemini para embeddings semánticos.
-- Los vectores se renormalizan a norma 1 en `services/gemini.py` tras
-  el truncamiento MRL (con `gemini-embedding-001` la salida cruda no
-  está unitarizada), así que COSINE y producto punto dan resultados
-  equivalentes; pero COSINE es más legible al interpretarse como
-  similitud entre 0 y 1.
+- COSINE es la métrica recomendada para embeddings semánticos por la
+  literatura general de RAG y por las guías oficiales tanto de Google
+  Gemini como de OpenAI.
+- Los vectores se renormalizan a norma 1 en
+  `services/openai_service.py` tras el truncamiento MRL (con
+  `dimensions=768` la salida cruda no está unitarizada), así que
+  COSINE y producto punto dan resultados equivalentes; pero COSINE es
+  más legible al interpretarse como similitud entre 0 y 1.
 
 Alternativas evaluadas y descartadas:
 
@@ -172,11 +170,11 @@ un rango habitual en sistemas RAG (entre 10% y 20%).
 
 El tope `max_chunks=100` es una salvaguarda contra documentos
 extremadamente largos. Sin él, un PDF de un libro completo de 500
-páginas podría generar miles de chunks y agotar la cuota gratuita de
-embeddings de Gemini en una sola operación. 100 chunks equivalen a
-~90 000 caracteres (aproximadamente 18 000 palabras), suficiente para
-cualquier documento académico habitual (un capítulo, un artículo, una
-tesis corta).
+páginas podría generar miles de chunks en una sola operación,
+disparando coste y latencia del lote de embeddings. 100 chunks
+equivalen a ~90 000 caracteres (aproximadamente 18 000 palabras),
+suficiente para cualquier documento académico habitual (un capítulo,
+un artículo, una tesis corta).
 
 Documentos más largos quedan **truncados**: solo se indexan los
 primeros 100 chunks. Esta es una limitación reconocida (ver sección 5).
@@ -187,115 +185,7 @@ primeros 100 chunks. Esta es una limitación reconocida (ver sección 5).
 
 ### 4.1 Estructura actual
 
-Cada punto que se inserta en Qdrant lleva un payload mínimo:
-
-```json
-{
-  "texto": "contenido del chunk...",
-  "source_path": "data/ejemplos/ml_intro.pdf",
-  "nombre_archivo": "ml_intro.pdf",
-  "tipo_fuente": "pdf",
-  "chunk_index": 0
-}
-```
-
-### 4.2 Significado de cada campo
-
-| Campo            | Tipo    | Uso                                                                                |
-| ---------------- | ------- | ---------------------------------------------------------------------------------- |
-| `texto`          | string  | El texto del chunk, devuelto al frontend como fuente de la respuesta               |
-| `source_path`    | string  | Ruta relativa al archivo original (`data/ejemplos/...`)                            |
-| `nombre_archivo` | string  | Nombre del archivo sin path, usado en la UI                                        |
-| `tipo_fuente`    | string  | Uno de `pdf`, `txt`, `md`, `image`. Usado para iconografía en la lista de docs    |
-| `chunk_index`    | integer | Posición del chunk dentro del documento original (0, 1, 2...)                      |
-
-### 4.3 Cómo se consume el payload
-
-- El endpoint `/query` devuelve los campos `nombre_archivo`,
-  `chunk_index` y el score como **fuentes** al frontend.
-- El endpoint `/documentos-indexados` hace `scroll` sobre toda la
-  colección agrupando por `source_path` para listar los documentos
-  únicos con su conteo de chunks.
-- El campo `texto` se usa internamente como contexto del prompt RAG y
-  también se muestra al usuario como excerpt de la fuente.
-
----
-
-## 5. Limitaciones identificadas
-
-El esquema actual cumple su función como prototipo, pero tiene cuatro
-limitaciones técnicas reconocidas:
-
-### 5.1 El identificador del punto no es idempotente
-
-El `point_id` se genera como `uuid.uuid4().int >> 64`, es decir, un
-entero aleatorio de 64 bits derivado de un UUID v4. Esto tiene dos
-problemas:
-
-- **No es idempotente.** Si el mismo documento se sube dos veces, los
-  chunks se duplican en Qdrant porque cada upsert genera IDs nuevos
-  aleatorios. El sistema no detecta que ya existían.
-- **Tiene riesgo teórico de colisión.** El espacio de 64 bits es
-  grande, pero al truncar un UUID v4 (que originalmente tiene 122 bits
-  de entropía) la probabilidad de colisión sube. En la práctica esto
-  no se manifiesta para volúmenes pequeños, pero es una debilidad de
-  diseño.
-
-### 5.2 No hay índices de payload
-
-Qdrant permite crear índices sobre campos del payload para que los
-filtros sean eficientes. La implementación actual no crea ningún
-índice. Hoy esto no es un problema porque ninguna búsqueda usa
-filtros (todas son globales), pero si en el futuro se quisiera filtrar
-por `tipo_fuente` o por `source_path`, los filtros serían lentos a
-gran escala.
-
-### 5.3 No se almacena metadata del modelo de embeddings
-
-El payload no incluye qué modelo generó el vector ni su dimensión. Si
-algún día se migrara a un modelo distinto, no habría forma de saber
-qué chunks fueron generados con qué modelo, lo que dificultaría una
-migración progresiva.
-
-### 5.4 Los chunks viejos no se borran al re-subir un documento
-
-Como el `point_id` no es idempotente, re-subir un documento crea
-chunks nuevos pero no borra los viejos. El backend no realiza una
-operación de borrado previo, así que los chunks del primer upload
-quedan huérfanos en la colección, consumiendo cuota sin ser
-referenciados por ningún documento listado en `/documentos-indexados`
-(que agrupa por `source_path` y muestra el conteo actual, no
-acumulado).
-
----
-
-## 6. Diseño propuesto de mejora
-
-Esta sección describe un esquema mejorado que resolvería las cuatro
-limitaciones de la sección 5. **No está implementado**, se documenta
-como trabajo futuro técnicamente justificado.
-
-### 6.1 Identificador determinístico con UUIDv5
-
-Reemplazar `uuid.uuid4().int >> 64` por un UUIDv5 derivado de un
-namespace fijo y de la concatenación `source_path + chunk_index`:
-
-```python
-import uuid
-NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # ej. namespace OID
-
-point_id = str(uuid.uuid5(NAMESPACE, f"{source_path}|{chunk_index}"))
-```
-
-Con esta estrategia, **el mismo chunk del mismo documento siempre
-produce el mismo ID**. Al hacer upsert con ese ID, Qdrant **sobrescribe**
-el punto anterior en lugar de crear uno duplicado. Esto resuelve la
-limitación 5.1 (idempotencia) y la 5.4 (chunks huérfanos): re-indexar
-un documento simplemente sobrescribe sus chunks existentes.
-
-### 6.2 Payload extendido con metadata de embedding y schema
-
-Añadir cinco campos al payload:
+Cada punto que se inserta en Qdrant lleva el siguiente payload:
 
 ```json
 {
@@ -304,26 +194,91 @@ Añadir cinco campos al payload:
   "nombre_archivo": "ml_intro.pdf",
   "tipo_fuente": "pdf",
   "chunk_index": 0,
-
-  "document_id": "uuid-v5-del-documento",
-  "embedding_model": "gemini-embedding-001",
+  "embedding_model": "text-embedding-3-large",
   "embedding_dim": 768,
-  "schema_version": "v2",
-  "created_at": "2026-05-11T18:30:00Z"
+  "schema_version": "1.0",
+  "created_at": "2026-05-17T02:14:30Z"
 }
 ```
 
-| Campo nuevo        | Propósito                                                      |
-| ------------------ | -------------------------------------------------------------- |
-| `document_id`      | UUIDv5 estable del documento entero (útil para agrupaciones)    |
-| `embedding_model`  | Saber qué modelo generó el vector (migración progresiva futura) |
-| `embedding_dim`    | Validación al leer; útil si la colección llegara a tener vectores de modelos distintos |
-| `schema_version`   | Permite evolucionar el payload sin romper datos viejos          |
-| `created_at`       | Trazabilidad temporal (útil para debugging y para borrados por antigüedad) |
+### 4.2 Significado de cada campo
 
-Estos campos resuelven la limitación 5.3.
+| Campo             | Tipo    | Uso                                                                                |
+| ----------------- | ------- | ---------------------------------------------------------------------------------- |
+| `texto`           | string  | El texto del chunk; se usa como contexto del prompt RAG y como excerpt al frontend |
+| `source_path`     | string  | Ruta relativa al archivo original (`data/ejemplos/...`)                            |
+| `nombre_archivo`  | string  | Nombre del archivo sin path, usado en la UI                                        |
+| `tipo_fuente`     | string  | Uno de `pdf`, `txt`, `md`, `image`. Usado para iconografía en la lista de docs    |
+| `chunk_index`     | integer | Posición del chunk dentro del documento original (0, 1, 2...)                      |
+| `embedding_model` | string  | Modelo que generó el vector. Útil para auditoría y migraciones progresivas         |
+| `embedding_dim`   | integer | Dimensión del vector. Validación contra la `size` configurada en la colección      |
+| `schema_version` | string  | Versión del esquema de payload, permite evolución sin romper datos viejos          |
+| `created_at`     | string  | Timestamp ISO-8601 UTC de cuando se indexó el chunk                                |
 
-### 6.3 Índices de payload para filtros futuros
+### 4.3 Identificador del punto
+
+El `point_id` es un **UUIDv5 determinístico** derivado de:
+
+```python
+uuid.uuid5(uuid.NAMESPACE_URL, f"{source_path}|{chunk_index}")
+```
+
+Esto garantiza que **el mismo chunk del mismo documento siempre produce
+el mismo ID**. Al hacer upsert con ese ID, Qdrant sobrescribe el punto
+anterior en lugar de crear uno duplicado. Re-indexar un documento
+simplemente reemplaza sus chunks existentes.
+
+### 4.4 Cómo se consume el payload
+
+- El endpoint `/query` devuelve los campos `nombre_archivo`,
+  `chunk_index`, el score y un excerpt de `texto` como **fuentes** al
+  frontend.
+- El endpoint `/documentos-indexados` hace `scroll` sobre toda la
+  colección agrupando por `source_path` para listar los documentos
+  únicos con su conteo de chunks y `tipo_fuente`.
+- Los campos `embedding_model`, `embedding_dim`, `schema_version` y
+  `created_at` no se exponen al frontend; sirven para auditoría
+  interna y para soportar evoluciones futuras del esquema.
+
+---
+
+## 5. Limitaciones identificadas
+
+El esquema actual cumple su función para el alcance académico, pero
+tiene dos limitaciones técnicas reconocidas:
+
+### 5.1 No hay índices de payload
+
+Qdrant permite crear índices sobre campos del payload para que los
+filtros sean eficientes. La implementación actual no crea ningún
+índice. Hoy esto no es un problema porque ninguna búsqueda usa
+filtros (todas son globales sobre la colección entera), pero si en el
+futuro se quisiera filtrar por `tipo_fuente` o por `embedding_model`,
+los filtros serían lentos a gran escala. La sección 6 describe el
+diseño de índices propuesto.
+
+### 5.2 Chunks excedentes huérfanos al re-subir un documento más corto
+
+El `point_id` es UUIDv5 determinístico desde `source_path|chunk_index`,
+por lo que re-indexar el **mismo número de chunks** simplemente
+sobrescribe los puntos anteriores. Pero si la nueva versión del
+documento genera **menos chunks** que la anterior (p. ej. se eliminaron
+páginas), los chunks excedentes de la versión vieja quedan huérfanos
+en Qdrant: nadie los referencia desde `/documentos-indexados` (que
+agrupa por `source_path` y muestra el conteo actual), pero ocupan
+espacio en la colección. La mitigación es borrar los chunks por
+`source_path` antes de re-indexar. Está documentado como trabajo
+futuro en [`Documento_Tecnico.md`](./Documento_Tecnico.md) §10.2.
+
+---
+
+## 6. Diseño propuesto de mejora
+
+Esta sección describe los índices de payload que **no están
+implementados** pero resolverían la limitación 5.1. Se documenta como
+trabajo futuro técnicamente justificado.
+
+### 6.1 Índices de payload para filtros eficientes
 
 Crear índices sobre los campos que probablemente se usarían como
 filtro:
@@ -336,7 +291,7 @@ client.create_payload_index(
 )
 client.create_payload_index(
     collection_name="mentor_ia_aprendizaje",
-    field_name="document_id",
+    field_name="source_path",
     field_schema=PayloadSchemaType.KEYWORD,
 )
 client.create_payload_index(
@@ -346,28 +301,30 @@ client.create_payload_index(
 )
 ```
 
-Estos índices habilitan filtros eficientes para casos futuros como:
+Estos índices habilitarían filtros eficientes para casos futuros como:
 
 - "Buscar solo en imágenes" (`filter: tipo_fuente == "image"`).
-- "Buscar dentro de un documento específico" (`filter: document_id == X`).
-- "Re-indexar todos los chunks del modelo viejo" (`filter: embedding_model != "gemini-embedding-001"`).
+- "Buscar dentro de un documento específico" (`filter: source_path == X`).
+- "Re-indexar todos los chunks de un modelo viejo"
+  (`filter: embedding_model != "text-embedding-3-large"`).
+- "Borrar chunks huérfanos" (combinación de `source_path` con
+  `chunk_index` para identificar el rango excedente).
 
-Esto resuelve la limitación 5.2.
+### 6.2 Coste estimado
 
-### 6.4 Resumen de la mejora
+Implementar los índices requiere ~30 minutos: añadir las llamadas a
+`create_payload_index` en el método `ensure_collection` del servicio
+Qdrant. Sin migración de datos: los índices se construyen en vivo
+sobre los puntos existentes.
 
-| Limitación                              | Solución propuesta                                |
-| --------------------------------------- | ------------------------------------------------- |
-| 5.1 Point ID no idempotente             | UUIDv5(`source_path` + `chunk_index`)             |
-| 5.2 No hay índices de payload           | Crear índices `KEYWORD` en `tipo_fuente`, `document_id`, `embedding_model` |
-| 5.3 Falta metadata del embedding        | Añadir `embedding_model`, `embedding_dim`, `schema_version`, `created_at` |
-| 5.4 Chunks huérfanos al re-subir        | Resuelto automáticamente por la idempotencia del ID |
+### 6.3 Identificador único de documento (opcional)
 
-El costo de implementar esta mejora se estima en 1–2 días de trabajo:
-modificación de `agente_extraccion.py` para generar el nuevo ID y
-payload, creación de los índices al iniciar el backend, y un script
-de migración para re-indexar los chunks existentes con el nuevo
-esquema.
+Como mejora adicional, se podría añadir un campo `document_id` con
+UUIDv5 derivado solo de `source_path` (sin chunk_index) para
+identificar el documento entero de forma estable, facilitando
+agrupaciones y borrados masivos por documento. No es estrictamente
+necesario porque `source_path` ya cumple ese rol como clave de
+agrupación natural, pero un UUID es más estable frente a renombrados.
 
 ---
 
@@ -376,41 +333,40 @@ esquema.
 Cuatro puntos clave sobre el modelo de datos:
 
 1. **La dimensión 768 y la distancia COSINE no son arbitrarias.** El
-   sistema usa `gemini-embedding-001` (reemplazo oficial de
-   `text-embedding-004`, deprecado el 14-ene-2026) con
-   `outputDimensionality=768` aplicando Matryoshka Representation
-   Learning: se obtienen las 768 dimensiones más informativas del
-   vector original de 3072. COSINE es la métrica recomendada por
-   Google para embeddings semánticos. Si te preguntan "¿por qué no
-   euclidiana?", la respuesta es: "porque tras renormalizar los
-   vectores a norma 1, la magnitud no aporta información; coseno mide
-   solo dirección, que es lo que codifica el significado". La
-   justificación completa de la migración del modelo y de mantener 768
-   vs 3072 está en [`Documento_Tecnico.md`](./Documento_Tecnico.md)
-   sección 6.7.
+   sistema usa OpenAI `text-embedding-3-large` con `dimensions=768`
+   aplicando Matryoshka Representation Learning: se obtienen las 768
+   dimensiones más informativas del vector original de 3072 que el
+   modelo produce nativamente. COSINE es la métrica estándar para
+   embeddings semánticos. Si surge la pregunta "¿por qué no euclidiana?",
+   la respuesta es: tras renormalizar los vectores a norma 1, la
+   magnitud no aporta información; coseno mide solo dirección, que es
+   lo que codifica el significado. La cronología de migraciones de
+   modelo que llevó al stack actual está en
+   [`Documento_Tecnico.md`](./Documento_Tecnico.md) §6.7.
 
 2. **El chunking 900/150 balancea precisión y contexto.** Chunks más
    pequeños serían más precisos pero perderían contexto; más grandes
    preservarían contexto pero diluirían la similitud. 900 caracteres
    equivale a un párrafo medio en español. El solape de 150 evita
    oraciones cortadas en el límite. El tope de 100 chunks por
-   documento es una salvaguarda contra textos enormes que agoten la
-   cuota gratuita de Gemini.
+   documento es una salvaguarda contra textos enormes y contra el
+   coste/latencia de un único lote masivo de embeddings.
 
-3. **El esquema actual tiene cuatro limitaciones técnicas reconocidas.**
-   El `point_id` no es idempotente (se duplican chunks al re-subir un
-   documento), no hay índices de payload, falta metadata del modelo y
-   los chunks viejos quedan huérfanos. Estas limitaciones están
-   documentadas en la sección 5 y existe un diseño de mejora
-   propuesto en la sección 6 que las resuelve usando UUIDv5
-   determinístico y payload extendido.
+3. **El payload incluye metadata de auditoría y trazabilidad.** Cada
+   chunk indexado guarda `embedding_model`, `embedding_dim`,
+   `schema_version` y `created_at`, además del texto y los datos de
+   identificación. Esto permite saber con qué modelo se generó cada
+   vector (clave para migraciones futuras), validar la dimensión al
+   leer y evolucionar el esquema sin romper datos viejos.
 
-4. **El diseño es single-tenant intencional.** No hay concepto de
-   propietario, curso o tenant porque el alcance académico es de
-   instancia individual. No es una omisión: la separación por usuario
-   se descartó explícitamente en
-   [`Documento_Tecnico.md`](./Documento_Tecnico.md) sección 3.2.
+4. **El esquema cumple las propiedades clave de un RAG productivo:**
+   identificadores idempotentes (UUIDv5 determinístico), metadata de
+   modelo en payload, y separación clara entre texto consultable y
+   metadata operativa. Las dos limitaciones reconocidas (sin índices
+   de payload activos y chunks excedentes huérfanos al re-subir un
+   documento más corto) están documentadas con su mitigación en la
+   sección 5 y el diseño de mejora propuesto en la sección 6.
 
 ---
 
-_Última actualización: 2026-05-11._
+_Última actualización: 2026-05-17._

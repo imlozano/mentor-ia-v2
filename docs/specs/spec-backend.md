@@ -14,7 +14,7 @@
 
 API REST con FastAPI que orquesta tres agentes (`AgenteExtraccion`,
 `AgenteRespuesta`, `AgentePlanRepaso`) sobre una base vectorial Qdrant,
-integra Google Gemini para LLM/embeddings y OCR multimodal, y Make.com
+integra OpenAI para LLM/embeddings y OCR multimodal, y Make.com
 para envío de correos.
 
 Despliegue local con `docker compose up`. Despliegue producción en un
@@ -32,13 +32,11 @@ backend/
 ├── data/
 │   └── ejemplos/                   Documentos subidos (PDF, TXT, MD, imágenes)
 ├── credentials/
-│   └── vision.json                 Credencial GCP Vision (no commitear)
 └── src/
     ├── __init__.py
     ├── app.py                      Endpoints FastAPI (entry point)
     ├── settings.py                 Configuración con pydantic-settings
     ├── models.py                   Pydantic schemas (request/response)
-    ├── deps.py                     Dependencias inyectables (clientes Qdrant, Gemini, etc.)
     ├── agentes/
     │   ├── __init__.py
     │   ├── agente_extraccion.py
@@ -46,8 +44,7 @@ backend/
     │   └── agente_plan_repaso.py
     ├── services/
     │   ├── __init__.py
-    │   ├── gemini.py               Wrapper de Google Gemini (LLM + embeddings)
-    │   ├── gemini_vision.py        OCR multimodal con Gemini Flash
+    │   ├── openai_service.py       Wrapper de OpenAI (chat + vision + embeddings)
     │   ├── qdrant_client.py        Conexión a Qdrant Cloud + helpers
     │   └── make_webhook.py         Cliente del webhook de Make.com
     ├── utils/
@@ -69,12 +66,13 @@ fastapi
 uvicorn[standard]
 pydantic>=2
 pydantic-settings
+email-validator                   # backend de EmailStr
 python-multipart                  # uploads
-httpx                             # cliente HTTP async
+httpx                             # cliente HTTP async (Make.com)
 pypdf>=6.0
 pypdfium2                         # render PDF->imagen para OCR multimodal
-qdrant-client
-google-genai                      # SDK oficial de Gemini
+qdrant-client                     # cliente async Qdrant Cloud
+openai>=1.50,<2.0                 # SDK oficial OpenAI (chat + vision + embeddings)
 loguru
 python-dotenv                     # solo en dev
 ```
@@ -130,7 +128,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str
     qdrant_ok: bool
-    gemini_ok: bool
+    openai_ok: bool
 
 class Fuente(BaseModel):
     archivo: str
@@ -181,13 +179,12 @@ class UploadResponse(BaseModel):
 
 | Método | Ruta                       | Request                     | Response                | Notas |
 | ------ | -------------------------- | --------------------------- | ----------------------- | ----- |
-| GET    | `/health`                  | —                           | `HealthResponse`        | Verifica Qdrant y Gemini con un ping liviano |
+| GET    | `/health`                  | —                           | `HealthResponse`        | Ping liviano a Qdrant y OpenAI |
 | GET    | `/documentos-indexados`    | —                           | `DocumentosResponse`    | Scroll Qdrant, agrupa por `source_path` |
-| POST   | `/upload-document`         | `multipart/form-data`<br>header `X-Filename` | `UploadResponse` | Guarda y re-ingesta |
+| POST   | `/upload-document`         | `multipart/form-data` (campo `file`) | `UploadResponse` | Guarda en disco y dispara `AgenteExtraccion` |
 | POST   | `/query`                   | `QueryRequest`              | `QueryResponse`         |       |
-| POST   | `/plan-repaso`             | `PlanRepasoRequest` o multipart con archivo + tema | `PlanRepasoResponse` |       |
-| POST   | `/ocr-imagen`              | `multipart/form-data` (campo `file`) | `OcrResponse` | OCR con Gemini multimodal, no indexa |
-| POST   | `/ingestar`                | —                           | `{ total_chunks: int }` | Re-indexa toda la carpeta `data/ejemplos` |
+| POST   | `/plan-repaso`             | `PlanRepasoRequest` o multipart con archivo + tema | `PlanRepasoResponse` | Acepta JSON o multipart |
+| POST   | `/ocr-imagen`              | `multipart/form-data` (campo `file`) | `OcrResponse` | OCR con OpenAI Vision multimodal, no indexa |
 
 ### 5.1 Detalles por endpoint
 
@@ -207,9 +204,9 @@ class UploadResponse(BaseModel):
 
 - Llamar a `AgenteRespuesta.responder(pregunta)`.
 - Si Qdrant devuelve resultados con score >= umbral (configurable, por
-  defecto `0.55` para COSINE en Gemini), usar RAG.
+  defecto `0.55` para COSINE), usar RAG.
 - Si no, generar respuesta sin contexto y marcar `origen="modelo"`.
-- Captura excepciones de Qdrant/Gemini y devuelve `503` con mensaje
+- Capturar excepciones de Qdrant/OpenAI y devolver `503` con mensaje
   claro, no `500` opaco.
 
 **`POST /plan-repaso`:**
@@ -224,8 +221,8 @@ class UploadResponse(BaseModel):
 
 **`POST /ocr-imagen`:**
 
-- Extrae texto con Gemini multimodal (`gemini-flash-latest`) a partir de
-  imágenes PNG/JPG/JPEG.
+- Extrae texto con OpenAI Vision multimodal (`gpt-4o-mini`) a partir
+  de imágenes PNG/JPG/JPEG.
 - Solo extrae texto, NO indexa.
 - Si el frontend luego quiere indexar el texto extraído (botón
   "Indexar documento"), llamará a `/upload-document` con un `.txt`
@@ -239,7 +236,7 @@ class UploadResponse(BaseModel):
 
 ```python
 class AgenteExtraccion:
-    def __init__(self, qdrant_client, gemini_service, vision_service): ...
+    def __init__(self, qdrant_client, openai_service, settings): ...
 
     async def ingestar_documento(self, path: Path) -> int:
         """Ingesta un único documento. Devuelve número de chunks creados."""
@@ -256,12 +253,17 @@ class AgenteExtraccion:
 Reglas:
 
 - Chunking: `max_chars=900`, `overlap=150`, `max_chunks=100`.
-- Embeddings: batch a Gemini (no uno por uno).
-- `point_id` actual: usar UUIDv5 determinístico
-  (`uuid.uuid5(NAMESPACE, f"{source_path}|{chunk_index}")`).
-  Esto resuelve idempotencia (al re-subir, sobrescribe).
-- Payload mínimo: `texto`, `source_path`, `nombre_archivo`,
-  `tipo_fuente`, `chunk_index`, `embedding_model`, `embedding_dim`,
+- Extracción de texto: `pypdf` para PDF con capa de texto; fallback
+  automático a OpenAI Vision multimodal cuando el promedio de
+  caracteres por página es menor a 50 (PDF escaneado) o el tipo es
+  imagen.
+- Embeddings: batch a OpenAI `text-embedding-3-large` con
+  `dimensions=768` (MRL) + renormalización a norma unitaria.
+- `point_id`: UUIDv5 determinístico
+  (`uuid.uuid5(NAMESPACE_URL, f"{source_path}|{chunk_index}")`).
+  Resuelve idempotencia (al re-subir, sobrescribe).
+- Payload: `texto`, `source_path`, `nombre_archivo`, `tipo_fuente`,
+  `chunk_index`, `embedding_model`, `embedding_dim`,
   `schema_version`, `created_at`.
 
 ### 6.2 `AgenteRespuesta`
@@ -270,7 +272,7 @@ Reglas:
 
 ```python
 class AgenteRespuesta:
-    def __init__(self, qdrant_client, gemini_service): ...
+    def __init__(self, qdrant_client, openai_service): ...
 
     async def responder(self, pregunta: str, top_k: int = 5,
                         umbral_score: float = 0.55) -> QueryResponse: ...
@@ -278,8 +280,8 @@ class AgenteRespuesta:
 
 Reglas:
 
-- Embedding de la pregunta con `gemini-embedding-001`
-  (`outputDimensionality=768`, renormalizado a norma unitaria).
+- Embedding de la pregunta con `text-embedding-3-large`
+  (`dimensions=768`, renormalizado a norma unitaria).
 - `query_points` sobre Qdrant con `limit=top_k`.
 - Filtrar por umbral. Si quedan ≥1 fuentes: RAG. Si no: modelo solo.
 - Prompt RAG: incluye los chunks como contexto numerado y la pregunta
@@ -292,7 +294,7 @@ Reglas:
 
 ```python
 class AgentePlanRepaso:
-    def __init__(self, qdrant_client, gemini_service, agente_extraccion,
+    def __init__(self, qdrant_client, openai_service, agente_extraccion,
                  make_webhook): ...
 
     async def generar_plan(self, tema: str, fecha_inicio: date,
@@ -313,52 +315,51 @@ Reglas:
 
 ## 7. Servicios externos
 
-### 7.1 `services/gemini.py`
+### 7.1 `services/openai_service.py`
 
-Wrapper del SDK `google-genai`. Métodos:
+Wrapper único del SDK `openai` (`AsyncOpenAI`) que concentra chat,
+vision multimodal y embeddings. Métodos:
 
 ```python
-class GeminiService:
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Devuelve vectores de 768 dim, renormalizados a norma 1. Llama en batches."""
+class OpenAIService:
+    async def generate(self, prompt: str, system: str | None = None) -> str:
+        """Chat completion con gpt-4o-mini. Reintentos exponenciales en RateLimitError."""
+
+    async def extract_text_from_image(self, image_bytes: bytes, mime: str) -> str:
+        """OCR multimodal: data URL base64 + prompt OCR. Reintentos con backoff."""
+
+    async def extract_text_from_pdf_page(self, image_bytes: bytes) -> str:
+        """Alias para páginas PDF renderizadas a PNG."""
 
     async def embed_query(self, text: str) -> list[float]:
-        """Igual que embed_texts pero para un único texto."""
+        """Vector de 768 dim renormalizado para una consulta."""
 
-    async def generate(self, prompt: str, system: str | None = None) -> str: ...
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Lote de vectores de 768 dim renormalizados."""
+
+    async def ping(self, timeout: float = 2.0) -> bool:
+        """models.retrieve(chat_model). No consume tokens."""
 
     @staticmethod
     def _normalize(vec: list[float]) -> list[float]:
         """Renormaliza un vector a norma euclídea 1. Necesario tras truncar
-        con outputDimensionality (MRL): los embeddings truncados pierden
-        la norma unitaria y degradan COSINE en Qdrant."""
+        con `dimensions` (MRL): los embeddings truncados pierden la norma
+        unitaria y degradan COSINE en Qdrant."""
         import math
         norm = math.sqrt(sum(x * x for x in vec)) or 1.0
         return [x / norm for x in vec]
 ```
 
-Modelos:
-- LLM: `gemini-flash-latest`.
-- Embeddings: `gemini-embedding-001` (reemplazo GA de `text-embedding-004`,
-  deprecado 14-ene-2026). Se llama con
-  `outputDimensionality=settings.embedding_output_dimensionality` (768).
-  Tras la llamada **es obligatorio aplicar `_normalize()`** a cada vector
-  antes de devolverlo o upsertearlo: el truncamiento MRL produce vectores
-  con norma ≠ 1 (medido empíricamente: ≈ 0.57), lo que degrada la métrica
-  COSINE en Qdrant.
+Modelos por defecto (configurables vía `Settings`):
 
-### 7.2 `services/gemini_vision.py`
+- Chat: `gpt-4o-mini`.
+- Vision (OCR): `gpt-4o-mini` (mismo modelo, modalidad multimodal).
+- Embeddings: `text-embedding-3-large` con `dimensions=768` (MRL).
+  Tras la llamada **es obligatorio aplicar `_normalize()`** a cada
+  vector antes de devolverlo o upsertearlo: el truncamiento MRL produce
+  vectores con norma ≠ 1, lo que degrada la métrica COSINE en Qdrant.
 
-```python
-class GeminiVisionService:
-    async def extract_text_from_image(self, image_bytes: bytes, mime: str) -> str:
-        """Extrae texto OCR de imágenes con gemini-flash-latest."""
-
-    async def extract_text_from_pdf_page(self, image_bytes: bytes) -> str:
-        """Extrae texto OCR de una página PDF renderizada como PNG."""
-```
-
-### 7.3 `services/qdrant_client.py`
+### 7.2 `services/qdrant_client.py`
 
 Wrapper sobre `qdrant-client`. Métodos relevantes:
 
@@ -376,7 +377,7 @@ class QdrantService:
     def ping(self) -> bool: ...
 ```
 
-### 7.4 `services/make_webhook.py`
+### 7.3 `services/make_webhook.py`
 
 ```python
 class MakeWebhookService:
@@ -384,15 +385,18 @@ class MakeWebhookService:
         """POST al webhook. True si 2xx."""
 ```
 
-### 7.5 Justificación de la decisión (Vision → Gemini multimodal)
+### 7.4 Justificación de la consolidación en OpenAI
 
-Se migra de Google Cloud Vision a Gemini multimodal porque Vision exige
-billing habilitado en GCP y ese prerequisito queda fuera del alcance
-operativo del prototipo académico. `gemini-flash-latest` acepta imágenes
-de forma nativa, por lo que permite mantener OCR para `.png/.jpg/.jpeg`
-y habilitar fallback para PDFs escaneados renderizando páginas con
-`pypdfium2`. En documentos con tipografía estándar, el rendimiento de
-extracción es comparable al flujo previo basado en Vision.
+El sistema fue migrando entre proveedores hasta consolidarse en
+OpenAI 100% (chat, vision multimodal y embeddings). La justificación
+detallada con cronología de las tres migraciones está en
+[`docs/academic/Documento_Tecnico.md`](../academic/Documento_Tecnico.md)
+§6.3 y §6.7. En resumen: el tier gratuito de Gemini no soportaba el
+patrón de uso del sistema (healthcheck cada 30 s + RAG continuo +
+múltiples llamadas LLM por petición); consolidar en OpenAI simplifica
+credenciales, cuotas y observabilidad (una sola key, una sola consola)
+y permite usar `gpt-4o-mini` tanto para chat como para OCR multimodal
+con calidad equivalente al flujo previo.
 
 ## 8. Configuración (`settings.py`)
 
@@ -400,16 +404,17 @@ Usar `pydantic-settings` para centralizar todas las variables:
 
 ```python
 class Settings(BaseSettings):
-    gemini_api_key: str
+    openai_api_key: str
     qdrant_url: str
     qdrant_api_key: str
     qdrant_collection: str = "mentor_ia_aprendizaje"
     make_webhook_url: str | None = None
     base_docs_dir: Path = Path("./data/ejemplos")
     cors_origins: list[str] = ["http://localhost:3000"]
-    embedding_model: str = "gemini-embedding-001"
-    embedding_output_dimensionality: int = 768
-    llm_model: str = "gemini-flash-latest"
+    openai_chat_model: str = "gpt-4o-mini"
+    openai_vision_model: str = "gpt-4o-mini"
+    openai_embedding_model: str = "text-embedding-3-large"
+    openai_embedding_dimensions: int = 768
     embedding_dim: int = 768
     chunk_max_chars: int = 900
     chunk_overlap: int = 150
@@ -432,7 +437,7 @@ CORSMiddleware(
 ```
 
 En desarrollo: `http://localhost:3000`. En producción: solo
-`https://mentor-ia-sistema.vercel.app`.
+`https://www.iamentor.tech`.
 
 ## 10. Logging
 
@@ -452,7 +457,7 @@ Cada endpoint debe distinguir tres tipos de error:
 | 400    | Input inválido (extensión, tamaño, formato)    |
 | 404    | Recurso no encontrado                          |
 | 422    | Pydantic validation error (automático)         |
-| 503    | Servicio externo caído (Qdrant, Gemini, Make) |
+| 503    | Servicio externo caído (Qdrant, OpenAI, Make) |
 | 500    | Errores no esperados (excepción no manejada)   |
 
 Cada respuesta de error tiene este formato:
@@ -507,16 +512,19 @@ Debe verificar:
 
 1. La app responde.
 2. Conexión a Qdrant Cloud (`client.get_collections()`).
-3. Conexión a Gemini (`embed_query("ping")` con timeout 2s).
+3. Conexión a OpenAI (`models.retrieve(chat_model)` con timeout 2s,
+   no consume tokens).
 
-Devuelve `200` con `qdrant_ok` y `gemini_ok` booleanos. No falla con 503
-si alguno está caído; informa el estado real para que el frontend pueda
-mostrar el badge.
+Devuelve `200` con `qdrant_ok` y `openai_ok` booleanos. No falla con
+503 si alguno está caído; informa el estado real para que el frontend
+muestre el badge correspondiente (Online / Parcial / Offline).
 
 ## 14. Lo que NO debe hacer el agente
 
 - Agregar autenticación JWT, login, o sistema de usuarios.
-- Agregar OpenAI, Anthropic u otro LLM distinto a Gemini.
+- Sustituir OpenAI por otro proveedor de LLM sin justificación
+  documentada y aprobada (la consolidación en OpenAI está
+  documentada en `Documento_Tecnico.md` §6.3).
 - Agregar Celery, Redis o cualquier sistema de colas.
 - Modificar parámetros de chunking sin pedir confirmación.
 - Cambiar la dimensión del vector (debe quedarse en 768).
@@ -528,7 +536,7 @@ mostrar el badge.
 El backend está terminado cuando:
 
 - [ ] `docker compose up` arranca sin errores.
-- [ ] `GET /health` responde 200 con `qdrant_ok=true` y `gemini_ok=true`.
+- [ ] `GET /health` responde 200 con `qdrant_ok=true` y `openai_ok=true`.
 - [ ] Subir un PDF de 5 páginas devuelve `chunks_ingresados > 0`.
 - [ ] Una consulta en `/query` sobre ese PDF devuelve `origen="rag"`
       con al menos una fuente.

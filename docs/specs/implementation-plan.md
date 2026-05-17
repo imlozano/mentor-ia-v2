@@ -30,11 +30,11 @@ Mapeo de alto nivel Fase del plan ↔ Tarea padre del WBS:
 
 Antes de empezar, el agente confirma con el estudiante que tiene:
 
-- [ ] `GEMINI_API_KEY` con acceso a `gemini-flash-latest` y
-      `gemini-embedding-001` (verificar con `outputDimensionality=768`).
+- [ ] `GEMINI_API_KEY` con acceso a `gpt-4o-mini` y
+      `text-embedding-3-large` (verificar con `dimensions=768`).
 - [ ] Cuenta en Qdrant Cloud con cluster activo. Variables `QDRANT_URL`
       y `QDRANT_API_KEY` listas.
-- [ ] Credenciales JSON de Google Cloud Vision API descargadas.
+- [ ] Credenciales JSON de OpenAI Vision API descargadas.
 - [ ] Webhook activo en Make.com con el escenario "plan-repaso →
       Iterator → Aggregator → Gmail Sender". URL en `MAKE_WEBHOOK_URL`.
 - [ ] Cuenta DigitalOcean con créditos activos.
@@ -66,7 +66,7 @@ respondiendo OK, aunque no haga nada útil aún.
    - Inicialización FastAPI.
    - Middleware CORS.
    - Middleware de `request_id`.
-   - Endpoint `GET /health` que responde `{ "status": "ok", "version": "0.1.0", "qdrant_ok": false, "gemini_ok": false }`
+   - Endpoint `GET /health` que responde `{ "status": "ok", "version": "0.1.0", "qdrant_ok": false, "openai_ok": false }`
      (sin verificar todavía).
 8. Crear `Dockerfile` y `docker-compose.yml`.
 9. Verificar localmente: `docker compose up` y `curl localhost:8000/health` devuelve 200.
@@ -105,11 +105,11 @@ que las claves funcionan.
 4. Crear `src/services/make_webhook.py` con:
    - Método `enviar_plan(payload)` que hace POST al webhook con
      timeout de 10s.
-5. Actualizar `GET /health` para que ahora SÍ verifique Qdrant y Gemini
+5. Actualizar `GET /health` para que ahora SÍ verifique Qdrant y OpenAI
    (con timeout 2s cada uno) y refleje el estado real.
 
 **Criterio de aceptación de Fase 2:** `/health` devuelve
-`qdrant_ok: true` y `gemini_ok: true`. El agente NO continúa hasta
+`qdrant_ok: true` y `openai_ok: true`. El agente NO continúa hasta
 confirmarlo.
 
 ---
@@ -265,7 +265,7 @@ el correo (verificar en bandeja de entrada).
 9. Actualizar `CORS_ORIGINS` para incluir el dominio frontend.
 
 **Criterio de aceptación de Fase 12:** la URL pública del backend
-responde en `/health` con `qdrant_ok: true, gemini_ok: true`.
+responde en `/health` con `qdrant_ok: true, openai_ok: true`.
 
 ---
 
