@@ -138,6 +138,9 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
+    # SMOKE TEST ROLLBACK — rotura intencional para validar el rollback
+    # automático del pipeline CI/CD. Se revierte inmediatamente después.
+    raise RuntimeError("smoke test rollback — rotura intencional")
     # Verificamos Qdrant y OpenAI (chat + vision + embeddings) en paralelo
     # con timeout 2s cada uno. /health NUNCA falla por dependencias caídas:
     # refleja estado real para que el frontend muestre degradación.
