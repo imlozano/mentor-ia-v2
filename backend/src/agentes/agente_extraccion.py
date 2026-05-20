@@ -4,6 +4,7 @@ import binascii
 import struct
 import uuid
 import zlib
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,10 +17,33 @@ from src.services.qdrant_client import QdrantService
 from src.settings import Settings
 from src.utils.chunking import chunkear
 from src.utils.pdf_reader import extraer_texto_pdf, extraer_texto_pdf_por_paginas
+from src.utils.upload_policy import IMAGE_EXTENSIONS, SUPPORTED_UPLOAD_EXTENSIONS
 
-_SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md", ".png", ".jpg", ".jpeg"}
-_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+_SUPPORTED_SUFFIXES = SUPPORTED_UPLOAD_EXTENSIONS
+_IMAGE_SUFFIXES = IMAGE_EXTENSIONS
 _PDF_SCANNED_THRESHOLD = 50
+
+
+@dataclass
+class IngestaResult:
+    """Resultado de ingestar un documento."""
+
+    chunks_ingresados: int
+    aviso: str | None = None
+
+
+def _cap_pdf_pages(total: int, limite: int) -> tuple[int, str | None]:
+    """Decide cuántas páginas procesar y devuelve un aviso si hubo truncado.
+
+    Función pura (sin pdfium) para poder testearla de forma aislada.
+    """
+    if limite > 0 and total > limite:
+        aviso = (
+            f"PDF truncado: se procesaron {limite} de {total} páginas "
+            f"por el límite de OCR configurado."
+        )
+        return limite, aviso
+    return total, None
 
 
 class AgenteExtraccion:
@@ -34,8 +58,8 @@ class AgenteExtraccion:
         self._settings = settings
         self._id_namespace = uuid.NAMESPACE_URL
 
-    async def ingestar_documento(self, path: Path) -> int:
-        """Ingesta un documento y devuelve cantidad de chunks indexados."""
+    async def ingestar_documento(self, path: Path, session_id: str | None = None) -> IngestaResult:
+        """Ingesta un documento y devuelve los chunks indexados y un aviso opcional."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"Archivo no encontrado: {path}")
 
@@ -43,29 +67,35 @@ class AgenteExtraccion:
         if suffix not in _SUPPORTED_SUFFIXES:
             raise ValueError(f"Extensión no soportada: {suffix}")
 
-        texto = await self._extraer_texto(path)
+        texto, aviso = await self._extraer_texto(path)
         chunks = self._chunkear(texto)
         if not chunks:
             logger.warning("ingesta sin chunks: {}", path)
-            return 0
+            return IngestaResult(chunks_ingresados=0, aviso=aviso)
 
         tipo = "image" if suffix in _IMAGE_SUFFIXES else suffix.lstrip(".")
         source_path = str(path.as_posix())
-        return await self._embed_y_upsert(chunks=chunks, source_path=source_path, tipo=tipo)
+        chunks_ingresados = await self._embed_y_upsert(
+            chunks=chunks, source_path=source_path, tipo=tipo, session_id=session_id
+        )
+        return IngestaResult(chunks_ingresados=chunks_ingresados, aviso=aviso)
 
-    async def ingestar_carpeta(self, carpeta: Path) -> dict[str, int]:
+    async def ingestar_carpeta(
+        self, carpeta: Path, session_id: str | None = None
+    ) -> dict[str, IngestaResult]:
         """Ingesta todos los archivos soportados de una carpeta."""
         if not carpeta.exists():
             return {}
 
-        resultados: dict[str, int] = {}
+        resultados: dict[str, IngestaResult] = {}
         for path in sorted(carpeta.iterdir()):
             if not path.is_file() or path.suffix.lower() not in _SUPPORTED_SUFFIXES:
                 continue
-            resultados[str(path)] = await self.ingestar_documento(path)
+            resultados[str(path)] = await self.ingestar_documento(path, session_id)
         return resultados
 
-    async def _extraer_texto(self, path: Path) -> str:
+    async def _extraer_texto(self, path: Path) -> tuple[str, str | None]:
+        """Devuelve (texto, aviso). El aviso solo se rellena si hubo truncado OCR."""
         suffix = path.suffix.lower()
         if suffix == ".pdf":
             pages = extraer_texto_pdf_por_paginas(path)
@@ -87,12 +117,17 @@ class AgenteExtraccion:
                     _PDF_SCANNED_THRESHOLD,
                 )
                 return await self._ocr_pdf_with_openai(path)
-            return extraer_texto_pdf(path)
+            return extraer_texto_pdf(path), None
         if suffix in {".txt", ".md"}:
-            return path.read_text(encoding="utf-8", errors="ignore")
+            return path.read_text(encoding="utf-8", errors="ignore"), None
         if suffix in _IMAGE_SUFFIXES:
             mime = "image/png" if suffix == ".png" else "image/jpeg"
-            return await self._openai.extract_text_from_image(path.read_bytes(), mime=mime)
+            texto = await self._openai.extract_text_from_image(
+                path.read_bytes(),
+                mime=mime,
+                max_tokens=self._settings.openai_max_tokens_ocr,
+            )
+            return texto, None
         raise ValueError(f"Extensión no soportada: {suffix}")
 
     def _chunkear(self, texto: str) -> list[str]:
@@ -103,23 +138,34 @@ class AgenteExtraccion:
             max_chunks=self._settings.chunk_max,
         )
 
-    async def _embed_y_upsert(self, chunks: list[str], source_path: str, tipo: str) -> int:
+    async def _embed_y_upsert(
+        self,
+        chunks: list[str],
+        source_path: str,
+        tipo: str,
+        session_id: str | None = None,
+    ) -> int:
         vectors = await self._openai.embed_texts(chunks)
         now = datetime.now(timezone.utc).isoformat()
         source_name = Path(source_path).name
 
         points: list[qmodels.PointStruct] = []
         for idx, (chunk, vector) in enumerate(zip(chunks, vectors)):
-            point_id = str(uuid.uuid5(self._id_namespace, f"{source_path}|{idx}"))
+            # El point_id incluye session_id para que el mismo archivo subido
+            # en dos sesiones distintas no se sobrescriba entre sí.
+            point_id = str(
+                uuid.uuid5(self._id_namespace, f"{session_id or ''}|{source_path}|{idx}")
+            )
             payload = {
                 "texto": chunk,
                 "source_path": source_path,
                 "nombre_archivo": source_name,
                 "tipo_fuente": tipo,
                 "chunk_index": idx,
+                "session_id": session_id,
                 "embedding_model": self._settings.openai_embedding_model,
                 "embedding_dim": self._settings.embedding_dim,
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "created_at": now,
             }
             points.append(qmodels.PointStruct(id=point_id, vector=vector, payload=payload))
@@ -127,26 +173,39 @@ class AgenteExtraccion:
         await self._qdrant.upsert_points(points)
         return len(points)
 
-    async def _ocr_pdf_with_openai(self, path: Path) -> str:
+    async def _ocr_pdf_with_openai(self, path: Path) -> tuple[str, str | None]:
         pdf = pdfium.PdfDocument(str(path))
         pages_text: list[str] = []
         try:
-            for idx in range(len(pdf)):
+            total_pages = len(pdf)
+            paginas_a_procesar, aviso = _cap_pdf_pages(
+                total_pages, self._settings.ocr_pdf_max_pages
+            )
+            if aviso:
+                logger.warning(
+                    "ocr-pdf: {} (archivo='{}')",
+                    aviso,
+                    path.name,
+                )
+            for idx in range(paginas_a_procesar):
                 page = pdf[idx]
                 bitmap = page.render(scale=2.0)
                 png_bytes = self._bitmap_to_png_bytes(bitmap)
-                extracted = await self._openai.extract_text_from_pdf_page(png_bytes)
+                extracted = await self._openai.extract_text_from_pdf_page(
+                    png_bytes, max_tokens=self._settings.openai_max_tokens_ocr
+                )
                 if extracted.strip():
                     pages_text.append(extracted.strip())
                 logger.debug(
-                    "pdf page OCR con OpenAI: archivo='{}' pagina={} chars_out={}",
+                    "pdf page OCR con OpenAI: archivo='{}' pagina={}/{} chars_out={}",
                     path.name,
                     idx + 1,
+                    paginas_a_procesar,
                     len(extracted),
                 )
         finally:
             pdf.close()
-        return "\n\n".join(pages_text)
+        return "\n\n".join(pages_text), aviso
 
     @staticmethod
     def _bitmap_to_png_bytes(bitmap) -> bytes:  # noqa: ANN001

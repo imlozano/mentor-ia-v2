@@ -42,7 +42,9 @@ class OpenAIService:
 
     # ----- Generación de texto -----
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(
+        self, prompt: str, system: str | None = None, max_tokens: int | None = None
+    ) -> str:
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -55,6 +57,7 @@ class OpenAIService:
                 response = await self._client.chat.completions.create(
                     model=self._settings.openai_chat_model,
                     messages=messages,  # type: ignore[arg-type]
+                    max_tokens=max_tokens,
                 )
                 text = response.choices[0].message.content or ""
                 return text.strip()
@@ -76,7 +79,9 @@ class OpenAIService:
 
     # ----- OCR multimodal -----
 
-    async def extract_text_from_image(self, image_bytes: bytes, mime: str) -> str:
+    async def extract_text_from_image(
+        self, image_bytes: bytes, mime: str, max_tokens: int | None = None
+    ) -> str:
         b64 = base64.b64encode(image_bytes).decode("ascii")
         data_url = f"data:{mime};base64,{b64}"
 
@@ -94,6 +99,7 @@ class OpenAIService:
                             ],
                         }
                     ],  # type: ignore[arg-type]
+                    max_tokens=max_tokens,
                 )
                 text = response.choices[0].message.content or ""
                 return text.strip()
@@ -110,8 +116,12 @@ class OpenAIService:
                 await asyncio.sleep(wait_s)
         return ""
 
-    async def extract_text_from_pdf_page(self, image_bytes: bytes) -> str:
-        return await self.extract_text_from_image(image_bytes, mime="image/png")
+    async def extract_text_from_pdf_page(
+        self, image_bytes: bytes, max_tokens: int | None = None
+    ) -> str:
+        return await self.extract_text_from_image(
+            image_bytes, mime="image/png", max_tokens=max_tokens
+        )
 
     # ----- Embeddings -----
 

@@ -75,6 +75,11 @@ jobs:
         run: |
           uv run python -c "from src.app import app; print(f'App OK con {len(app.routes)} rutas')"
 
+      - name: Tests (pytest)
+        # conftest.py inyecta variables de entorno dummy; no se hacen
+        # llamadas de red reales (servicios externos mockeados).
+        run: uv run pytest -q
+
   # ─────────────────────────────────────────────────────────────────────────
   # Frontend: pnpm lint, tsc --noEmit, pnpm audit (no bloqueante)
   # ─────────────────────────────────────────────────────────────────────────

@@ -59,7 +59,6 @@ class OcrResponse(BaseModel):
 
 class DocumentoIndexado(BaseModel):
     nombre_archivo: str
-    source_path: str
     tipo_fuente: Literal["pdf", "txt", "md", "image"]
     total_chunks: int
 
@@ -74,3 +73,4 @@ class UploadResponse(BaseModel):
     status: Literal["ok"]
     archivo: str
     chunks_ingresados: int
+    aviso: str | None = None

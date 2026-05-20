@@ -42,7 +42,7 @@ export function DocumentsList({ docs }: { docs: DocumentoIndexado[] }) {
       <div className="space-y-2">
         {docs.map((doc) => (
           <div
-            key={doc.source_path}
+            key={doc.nombre_archivo}
             className="flex items-center justify-between gap-2 rounded-xl bg-muted/30 p-3 transition-colors hover:bg-muted/50"
           >
             <div className="flex min-w-0 flex-1 items-center gap-2.5">

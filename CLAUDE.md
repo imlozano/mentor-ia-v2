@@ -230,11 +230,39 @@ BASE_DOCS_DIR=./data/ejemplos
 CORS_ORIGINS=["https://www.iamentor.tech","https://iamentor.tech","http://localhost:3000"]
 ```
 
+Variables opcionales con default seguro (todas leídas vía `Settings`; solo
+hace falta declararlas en `.env` para sobreescribir el default):
+
+```
+# Rate limiting (formato slowapi "N/minute") — endurecimiento Sprint 1
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_QUERY=20/minute
+RATE_LIMIT_UPLOAD=10/minute
+RATE_LIMIT_PLAN=5/minute
+RATE_LIMIT_OCR=10/minute
+
+# Tope de páginas que se envían a OpenAI Vision por PDF escaneado
+OCR_PDF_MAX_PAGES=20
+
+# Límites de tamaño de archivo subido (bytes): imagen / PDF / TXT-MD
+MAX_IMAGE_BYTES=10485760
+MAX_PDF_BYTES=26214400
+MAX_TEXT_BYTES=5242880
+
+# max_tokens por tipo de llamada OpenAI (acota coste por respuesta)
+OPENAI_MAX_TOKENS_CHAT=800
+OPENAI_MAX_TOKENS_OCR=2000
+OPENAI_MAX_TOKENS_PLAN=400
+```
+
 Notas:
 - `CORS_ORIGINS` debe ir como **JSON array** (con corchetes y comillas dobles),
   no CSV. `pydantic-settings` 2.x intenta `json.loads()` antes de los validators.
 - `GEMINI_API_KEY` y `GOOGLE_VISION_KEY_JSON_PATH` quedaron obsoletos tras
   la migración total a OpenAI (§2.5). Pueden eliminarse del repo y del Droplet.
+- El aislamiento entre visitantes se hace con un `session_id` anónimo que el
+  frontend envía en el header `X-Session-ID` (NO es autenticación; cumple §2.1).
+  No hay variable de entorno asociada: se genera en el navegador.
 
 **Frontend (`frontend/.env.local`):**
 
