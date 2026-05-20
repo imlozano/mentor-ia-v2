@@ -1,0 +1,52 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Lunes 03:00 UTC — re-analizar incluso sin cambios de código para
+    # detectar CVEs de queries de CodeQL publicadas tras el último merge.
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write  # subir alertas al tab Security
+  actions: read            # leer metadata del workflow
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # python: src/ del backend FastAPI.
+        # javascript-typescript: app y components del frontend Next.js.
+        language: [python, javascript-typescript]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@78ed0c7291d93e40c51b085850dc669a4c3ab73b # v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended: incluye reglas más estrictas que el default
+          # (más recall, algo más de falsos positivos — aceptable para 1 dev).
+          queries: security-extended
+
+      - name: Autobuild
+        # Para Python y JS/TS este step normalmente solo indexa sin compilar.
+        uses: github/codeql-action/autobuild@78ed0c7291d93e40c51b085850dc669a4c3ab73b # v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@78ed0c7291d93e40c51b085850dc669a4c3ab73b # v3
+        with:
+          category: "/language:${{ matrix.language }}"
