@@ -29,8 +29,7 @@ class AgenteRespuesta:
         if fuentes_filtradas:
             fuentes = [self._to_fuente(hit) for hit in fuentes_filtradas]
             contexto = "\n\n".join(
-                f"[Fuente {idx + 1}] {fuente.excerpt}"
-                for idx, fuente in enumerate(fuentes)
+                f"[Fuente {idx + 1}] {fuente.excerpt}" for idx, fuente in enumerate(fuentes)
             )
             prompt = (
                 "Responde de forma clara y útil en español, usando solo el contexto "
@@ -67,4 +66,3 @@ class AgenteRespuesta:
             score=float(hit.score or 0.0),
             excerpt=str(payload.get("texto") or "")[:500],
         )
-

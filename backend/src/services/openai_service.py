@@ -24,8 +24,7 @@ import re
 from typing import Sequence
 
 from loguru import logger
-from openai import AsyncOpenAI
-from openai import APIError, APITimeoutError, RateLimitError
+from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from src.settings import Settings
 

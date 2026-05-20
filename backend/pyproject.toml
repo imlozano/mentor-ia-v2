@@ -27,7 +27,24 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pip-audit>=2.7",
+    "ruff>=0.7",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["data", ".venv"]
+
+[tool.ruff.lint]
+# Ruleset conservador para no romper código existente: pycodestyle errors (E),
+# pyflakes (F), import order (I). Se puede ampliar a B/UP/SIM más adelante.
+select = ["E", "F", "I"]
+# E501 se gestiona por el formatter; no fallar el lint por línea larga.
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 # Cadena de suministro: ignora paquetes publicados en los últimos 7 días para
 # dar tiempo a la comunidad a detectar versiones comprometidas antes de que

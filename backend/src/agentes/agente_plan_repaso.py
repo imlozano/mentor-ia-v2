@@ -39,7 +39,9 @@ class AgentePlanRepaso:
             chunks_ingresados = await self._agente_extraccion.ingestar_documento(archivo)
 
         contexto = await self._buscar_contexto(tema)
-        sesiones = await self._generar_sesiones(tema=tema, fecha_inicio=fecha_inicio, contexto=contexto)
+        sesiones = await self._generar_sesiones(
+            tema=tema, fecha_inicio=fecha_inicio, contexto=contexto
+        )
 
         payload = {
             "tema": tema,
@@ -113,7 +115,7 @@ class AgentePlanRepaso:
             return [
                 f"Repasar conceptos clave de {tema} enfocados en {tipo}.",
                 f"Resolver un ejercicio corto relacionado con {tema}.",
-                f"Escribir un resumen de 5 ideas esenciales del tema.",
+                "Escribir un resumen de 5 ideas esenciales del tema.",
             ]
         lines = [line.strip("- ").strip() for line in raw.splitlines() if line.strip()]
         if len(lines) >= 3:
@@ -121,6 +123,5 @@ class AgentePlanRepaso:
         return [
             f"Repasar conceptos clave de {tema} enfocados en {tipo}.",
             f"Resolver un ejercicio corto relacionado con {tema}.",
-            f"Escribir un resumen de 5 ideas esenciales del tema.",
+            "Escribir un resumen de 5 ideas esenciales del tema.",
         ]
-

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import binascii
-from datetime import datetime, timezone
-from pathlib import Path
 import struct
 import uuid
 import zlib
+from datetime import datetime, timezone
+from pathlib import Path
 
-from loguru import logger
 import pypdfium2 as pdfium
+from loguru import logger
 from qdrant_client.http import models as qmodels
 
 from src.services.openai_service import OpenAIService
@@ -175,4 +175,3 @@ class AgenteExtraccion:
         png.extend(chunk(b"IDAT", compressed))
         png.extend(chunk(b"IEND", b""))
         return bytes(png)
-
