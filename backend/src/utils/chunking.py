@@ -52,5 +52,6 @@ if __name__ == "__main__":
     print(f"chunk 0 len: {len(out[0])}")
     print(f"chunk 0 head: {out[0][:60]!r}")
     print(f"chunk 1 head: {out[1][:60]!r}")
-    print(f"overlap entre chunk 0 y chunk 1 detectable: "
-          f"{out[0][-60:].split() != out[1][:60].split()}")
+    print(
+        f"overlap entre chunk 0 y chunk 1 detectable: {out[0][-60:].split() != out[1][:60].split()}"
+    )

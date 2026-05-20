@@ -14,8 +14,8 @@ from src.agentes.agente_plan_repaso import AgentePlanRepaso
 from src.agentes.agente_respuesta import AgenteRespuesta
 from src.logger import setup_logging
 from src.models import (
-    DocumentosResponse,
     DocumentoIndexado,
+    DocumentosResponse,
     HealthResponse,
     OcrResponse,
     PlanRepasoRequest,
