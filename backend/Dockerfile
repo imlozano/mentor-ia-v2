@@ -25,6 +25,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"
 
+# Parche de CVEs HIGH en setuptools/wheel vendored del base image:
+#   - CVE-2026-23949 jaraco.context <6.1.0 (path traversal en tar)
+#   - CVE-2026-24049 wheel <0.46.2 (RCE vía wheel malicioso)
+# No son explotables en este contenedor (no procesa tars/wheels del usuario),
+# pero Trivy las reporta y queremos imagen limpia. Reusamos uv del builder
+# para mantener coherencia (el proyecto gestiona deps Python con uv, no pip).
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+RUN uv pip install --system --no-cache --upgrade \
+        'setuptools>=80' 'wheel>=0.46.2'
+
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 
 WORKDIR /app

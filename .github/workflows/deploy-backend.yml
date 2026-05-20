@@ -68,14 +68,19 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # Capturamos el SHA estable previo ANTES de aplicar el nuevo, para
+          # tenerlo disponible si necesitamos rollback. El archivo
+          # ~/.mentor-ia-last-stable-sha lo gestiona este propio workflow:
+          # se actualiza solo cuando el health check pasa.
           ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
               "$DEPLOY_USER@$DEPLOY_HOST" \
               "set -euo pipefail
                cd '$DEPLOY_PROJECT_PATH'
-               echo '── git pull ──'
+               PREV_SHA=\$(cat ~/.mentor-ia-last-stable-sha 2>/dev/null || echo '')
+               echo \"── SHA estable previo: \${PREV_SHA:-<ninguno>} ──\"
+               echo '── git fetch + reset al nuevo SHA ──'
                git fetch --tags origin main
-               git checkout main
                git reset --hard '$COMMIT_SHA'
                echo '── docker compose build + up ──'
                docker compose up -d --build backend
@@ -83,18 +88,86 @@ jobs:
                docker image prune -f"
 
       - name: Health check (12 intentos × 5s = 60s)
+        id: health
         run: |
           set -euo pipefail
           for i in $(seq 1 12); do
             if curl -fsS --max-time 5 https://api.iamentor.tech/health > /tmp/health.json; then
               echo "Backend healthy ✓"
               cat /tmp/health.json
+              echo "ok=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "Intento $i/12 — backend aún no responde, esperando..."
             sleep 5
           done
-          echo "::error::Backend no respondió tras 60s. Revisa logs en el droplet."
+          echo "::warning::Backend no respondió tras 60s. Se intentará rollback."
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+          exit 0  # No fallar aquí: damos paso al step de rollback.
+
+      - name: Registrar nuevo SHA como estable (camino feliz)
+        if: steps.health.outputs.ok == 'true'
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "echo '$COMMIT_SHA' > ~/.mentor-ia-last-stable-sha"
+          echo "SHA $COMMIT_SHA registrado como estable en el droplet."
+
+      - name: Rollback automático (si health falló)
+        if: steps.health.outputs.ok == 'false'
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PROJECT_PATH: ${{ secrets.DEPLOY_PROJECT_PATH }}
+        run: |
+          set -euo pipefail
+          echo "── Iniciando rollback ──"
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -euo pipefail
+               cd '$DEPLOY_PROJECT_PATH'
+               PREV_SHA=\$(cat ~/.mentor-ia-last-stable-sha 2>/dev/null || echo '')
+               if [ -z \"\$PREV_SHA\" ]; then
+                 echo '::error::No hay SHA estable previo guardado. Rollback imposible.'
+                 exit 2
+               fi
+               echo \"── Revirtiendo a SHA \$PREV_SHA ──\"
+               git reset --hard \"\$PREV_SHA\"
+               docker compose up -d --build backend
+               docker image prune -f
+               echo '── Rollback aplicado, verificando health localmente ──'
+               sleep 10
+               for i in 1 2 3 4 5 6; do
+                 if docker exec mentor-ia-backend python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\", timeout=2)' 2>/dev/null; then
+                   echo 'Health interno OK tras rollback'
+                   exit 0
+                 fi
+                 sleep 5
+               done
+               echo '::error::Rollback aplicado pero /health sigue fallando — intervención manual requerida'
+               exit 3"
+
+      - name: Verificación final externa
+        if: steps.health.outputs.ok == 'true'
+        run: |
+          # Si llegamos aquí, el deploy salió bien. Esta verificación es
+          # informativa: confirma que la URL pública responde después de
+          # registrar el SHA estable.
+          curl -fsS --max-time 10 https://api.iamentor.tech/health | tee /tmp/final.json
+          echo "Deploy completo ✓"
+
+      - name: Marcar workflow como fallido si hubo rollback
+        if: steps.health.outputs.ok == 'false'
+        run: |
+          echo "::error::Health check inicial falló. Rollback aplicado. Servicio restaurado al SHA previo."
+          echo "El job termina en fallo para que aparezca rojo en GitHub y se vea en el historial."
           exit 1
 
       - name: Limpiar clave SSH
