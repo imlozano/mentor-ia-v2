@@ -309,7 +309,6 @@ screenshots están listos para el documento.
 ## Lo que NO está en este plan
 
 - Tests unitarios formales (fuera del alcance académico).
-- CI/CD (deploy manual es suficiente).
 - Observabilidad avanzada (Sentry, Datadog) (overkill).
 - Autenticación de usuarios (explícitamente fuera de alcance).
 - Internacionalización (proyecto solo español).

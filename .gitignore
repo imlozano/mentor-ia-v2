@@ -64,6 +64,10 @@ tmp/
 docs/specs/handoff-state.md
 handoff-progress.md
 
-
-#------
-minimalist-website-redesign/*
+# ---- Tooling de agentes (skills sincronizadas, no versionar) ----
+/backend/.agents/
+/backend/.claude/
+/frontend/.agents/
+/frontend/.claude/
+skills-lock.json
+/.claude/settings.local.json
