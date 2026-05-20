@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000"]
+    # Regex opcional para orígenes dinámicos (p. ej. URLs de preview de Vercel
+    # con hash variable por deploy). Se aplica además de cors_origins.
+    cors_origin_regex: str | None = None
 
     # --- Modelos OpenAI ---
     # Plan B activado el 2026-05-17 (gemini-embedding-2 también agotó cuota

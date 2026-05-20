@@ -48,7 +48,7 @@ export function DocumentsList({ docs }: { docs: DocumentoIndexado[] }) {
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               {iconFor(doc.tipo_fuente)}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium">
+                <p className="text-xs font-medium [overflow-wrap:anywhere]">
                   {doc.nombre_archivo}
                 </p>
                 <p className="text-[10px] text-muted-foreground">
