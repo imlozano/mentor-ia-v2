@@ -1,0 +1,84 @@
+name: Deploy backend al droplet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+# Un solo deploy a la vez. NO cancelar el que esté en curso (puede dejar la
+# imagen Docker a medio construir).
+concurrency:
+  group: deploy-backend-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: SSH deploy + health check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Ambiente "production" — permite añadir reglas de protección en GitHub
+    # (approvals manuales, secret scoping) sin tocar este yml.
+    environment:
+      name: production
+      url: https://api.iamentor.tech/health
+    steps:
+      - name: Preparar SSH (clave dedicada al CI)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Pull + rebuild backend en el droplet
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PROJECT_PATH: ${{ secrets.DEPLOY_PROJECT_PATH }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -euo pipefail
+               cd '$DEPLOY_PROJECT_PATH'
+               echo '── git pull ──'
+               git fetch --tags origin main
+               git checkout main
+               git reset --hard '$COMMIT_SHA'
+               echo '── docker compose build + up ──'
+               docker compose up -d --build backend
+               echo '── prune imágenes viejas ──'
+               docker image prune -f"
+
+      - name: Health check (12 intentos × 5s = 60s)
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 5 https://api.iamentor.tech/health > /tmp/health.json; then
+              echo "Backend healthy ✓"
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "Intento $i/12 — backend aún no responde, esperando..."
+            sleep 5
+          done
+          echo "::error::Backend no respondió tras 60s. Revisa logs en el droplet."
+          exit 1
+
+      - name: Limpiar clave SSH
+        if: always()
+        run: shred -u ~/.ssh/id_ed25519 2>/dev/null || rm -f ~/.ssh/id_ed25519

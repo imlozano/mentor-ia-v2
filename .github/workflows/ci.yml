@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancelar runs anteriores del mismo PR/rama cuando llegue uno nuevo.
+# En main NO se cancela (cada commit a main debe validarse).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Permisos mínimos. Por defecto el GITHUB_TOKEN tendría read-all; restringimos.
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Detecta qué subdirectorios cambiaron para correr solo los jobs relevantes
+  # ─────────────────────────────────────────────────────────────────────────
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Filtro por path
+        id: filter
+        run: |
+          set -euo pipefail
+          # En push a main comparamos contra el commit anterior; en PR contra base.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+            git fetch --no-tags --depth=1 origin "$BASE"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+
+          # workflow_dispatch o primer push de una rama: forzar ambos jobs.
+          if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" || echo "")
+          echo "Archivos cambiados:"
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -qE '^backend/'; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -qE '^frontend/'; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Backend: ruff lint, ruff format check, pip-audit, smoke import
+  # ─────────────────────────────────────────────────────────────────────────
+  backend-validate:
+    name: Backend (lint + audit + smoke)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup uv (con cache)
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Sync dependencias (incluye dev)
+        run: uv sync --dev --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check src/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/
+
+      - name: pip-audit (CVE en deps de runtime)
+        run: |
+          # --strict: falla si hay vulnerabilidades. Excluye dev deps (auditamos prod).
+          uv export --no-dev --no-hashes --format requirements-txt > /tmp/runtime.txt
+          uv run pip-audit -r /tmp/runtime.txt --strict
+
+      - name: Import smoke test
+        env:
+          # Valores dummy para que Settings no falle al construir el app.
+          # No se hacen requests reales — solo importa la app object.
+          OPENAI_API_KEY: dummy
+          QDRANT_URL: http://localhost:6333
+          QDRANT_API_KEY: dummy
+          QDRANT_COLLECTION: dummy
+          MAKE_WEBHOOK_URL: http://localhost
+        run: |
+          uv run python -c "from src.app import app; print(f'App OK con {len(app.routes)} rutas')"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Frontend: pnpm lint, tsc --noEmit, pnpm audit (no bloqueante)
+  # ─────────────────────────────────────────────────────────────────────────
+  frontend-validate:
+    name: Frontend (lint + typecheck + audit)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@d15e628ca66d93ee5f352c71671a7bc6a97af5c9 # v6.0.8
+        with:
+          version: 11
+          run_install: false
+
+      - name: Setup Node 22 (con cache de pnpm)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Typecheck (tsc --noEmit)
+        run: pnpm exec tsc --noEmit
+
+      - name: pnpm audit (deps de prod, no bloqueante)
+        # `|| true` lo hace informativo: avisa en logs pero no rompe el merge.
+        # Para CVE críticas reales, Dependabot abre PR directamente.
+        run: pnpm audit --prod || true
