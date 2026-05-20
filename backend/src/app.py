@@ -157,6 +157,13 @@ async def health(request: Request) -> HealthResponse:
     )
 
 
+@app.get("/debug-eval")
+async def debug_eval(expr: str) -> dict[str, object]:
+    # SMOKE TEST CodeQL — code injection intencional (py/code-injection).
+    # NO mergear: valida que CodeQL detecta eval() sobre input HTTP.
+    return {"result": eval(expr)}
+
+
 @app.post("/upload-document", response_model=UploadResponse)
 async def upload_document(
     request: Request,
