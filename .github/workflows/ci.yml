@@ -18,62 +18,14 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
-  # Detecta qué subdirectorios cambiaron para correr solo los jobs relevantes
-  # ─────────────────────────────────────────────────────────────────────────
-  changes:
-    name: Detectar cambios
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Filtro por path
-        id: filter
-        run: |
-          set -euo pipefail
-          # En push a main comparamos contra el commit anterior; en PR contra base.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-            HEAD="${{ github.event.pull_request.head.sha }}"
-            git fetch --no-tags --depth=1 origin "$BASE"
-          else
-            BASE="${{ github.event.before }}"
-            HEAD="${{ github.sha }}"
-          fi
-
-          # workflow_dispatch o primer push de una rama: forzar ambos jobs.
-          if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD" || echo "")
-          echo "Archivos cambiados:"
-          echo "$CHANGED"
-
-          if echo "$CHANGED" | grep -qE '^backend/'; then
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "backend=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if echo "$CHANGED" | grep -qE '^frontend/'; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "frontend=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  # ─────────────────────────────────────────────────────────────────────────
   # Backend: ruff lint, ruff format check, pip-audit, smoke import
   # ─────────────────────────────────────────────────────────────────────────
+  # NOTA: ambos jobs corren siempre. Filtrar por subdir cambiado con git diff
+  # en PRs es frágil (actions/checkout usa merge commits) y la complejidad no
+  # compensa el ahorro (~30s por job). Si en el futuro hay muchos más jobs,
+  # migrar a `dorny/paths-filter@v3` pineado por SHA.
   backend-validate:
     name: Backend (lint + audit + smoke)
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -126,8 +78,6 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   frontend-validate:
     name: Frontend (lint + typecheck + audit)
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
