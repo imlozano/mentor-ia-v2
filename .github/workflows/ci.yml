@@ -166,6 +166,10 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
+          # IMPORTANTE: por defecto el formato SARIF ignora `severity` e
+          # incluye todas las severidades. Con `exit-code: 1` un MEDIUM
+          # rompería el job. Esto fuerza al SARIF a respetar el filtro.
+          limit-severities-for-sarif: true
           exit-code: 1
           ignore-unfixed: true
 
