@@ -57,8 +57,10 @@ jobs:
 
       - name: pip-audit (CVE en deps de runtime)
         run: |
-          # --strict: falla si hay vulnerabilidades. Excluye dev deps (auditamos prod).
-          uv export --no-dev --no-hashes --format requirements-txt > /tmp/runtime.txt
+          # --no-emit-project: excluye el propio paquete (no está en PyPI).
+          # --no-dev: solo deps de runtime; las dev (ruff, pip-audit) no van a prod.
+          # --strict: falla si hay vulnerabilidades. Dependabot abre PRs en paralelo.
+          uv export --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/runtime.txt
           uv run pip-audit -r /tmp/runtime.txt --strict
 
       - name: Import smoke test
