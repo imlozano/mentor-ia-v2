@@ -176,8 +176,8 @@ mentor-ia-v2/
 - `loguru` para logging (no `print()`).
 - `httpx` para llamadas HTTP externas (no `requests`).
 - Estructura: `src/app.py` (endpoints), `src/agentes/` (3 agentes),
-  `src/services/` (clientes a Gemini, Gemini Vision, Make; futuro OpenAI), `src/models.py`
-  (Pydantic schemas).
+  `src/services/` (clientes a OpenAI (chat+vision+embeddings), Qdrant y
+  Make), `src/models.py` (Pydantic schemas).
 - Variables de entorno: leer con `pydantic-settings` desde un `Settings`
   centralizado, NO con `os.environ.get` esparcido.
 
