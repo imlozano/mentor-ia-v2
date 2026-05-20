@@ -103,6 +103,26 @@ implementación.
 
 ---
 
+## 4.bis Endurecimiento de producción (Sprint 1 — 2026-05-20)
+
+Cambios aplicados para blindar el despliegue público (`api.iamentor.tech`)
+sin introducir autenticación (CLAUDE.md §2.1):
+
+- **Rate limiting** (`slowapi`) en `/query`, `/upload-document`, `/plan-repaso`
+  y `/ocr-imagen`, por IP + `X-Session-ID`. Configurable por env
+  (`RATE_LIMIT_*`). Mitiga el abuso de coste de créditos OpenAI.
+- **Aislamiento por `session_id` anónimo**: el frontend genera un UUIDv4 y lo
+  envía en `X-Session-ID`. Los documentos, consultas y planes se filtran por
+  ese id en Qdrant; los documentos sin `session_id` (legacy) quedan aislados.
+- **Tope de páginas OCR** (`OCR_PDF_MAX_PAGES`, default 20) para PDFs
+  escaneados: evita cientos de llamadas a OpenAI Vision por un solo archivo.
+- **Validación uniforme de archivos** (extensión y tamaño, incl. TXT/MD) y
+  `max_tokens` acotados en todas las llamadas OpenAI.
+- `source_path` deja de exponerse en `/documentos-indexados`.
+
+Pendiente (Sprint 2): política de retención/borrado de archivos subidos,
+unificación del plan en una sola llamada LLM, `pnpm audit` bloqueante.
+
 ## 5. Histórico de CVEs resueltos
 
 ### 5.1 CVE-2026-44431 — `urllib3` header leak en redirects cross-origin

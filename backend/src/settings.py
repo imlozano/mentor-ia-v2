@@ -45,6 +45,30 @@ class Settings(BaseSettings):
     rag_score_threshold: float = 0.55
     rag_top_k: int = 5
 
+    # --- Rate limiting (formato slowapi: "N/minute") ---
+    # Endpoints públicos que consumen créditos OpenAI. Configurable por env
+    # para poder relajarlos en demos o endurecerlos ante abuso.
+    rate_limit_enabled: bool = True
+    rate_limit_query: str = "20/minute"
+    rate_limit_upload: str = "10/minute"
+    rate_limit_plan: str = "5/minute"
+    rate_limit_ocr: str = "10/minute"
+
+    # --- OCR de PDF escaneado ---
+    # Tope de páginas que se mandan a OpenAI Vision por documento. Evita que
+    # un único PDF escaneado dispare cientos de llamadas multimodales.
+    ocr_pdf_max_pages: int = 20
+
+    # --- Límites de tamaño de archivo (bytes) ---
+    max_image_bytes: int = 10 * 1024 * 1024  # 10 MB
+    max_pdf_bytes: int = 25 * 1024 * 1024  # 25 MB
+    max_text_bytes: int = 5 * 1024 * 1024  # 5 MB (TXT/MD)
+
+    # --- max_tokens OpenAI (acota coste por respuesta) ---
+    openai_max_tokens_chat: int = 800
+    openai_max_tokens_ocr: int = 2000
+    openai_max_tokens_plan: int = 400
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

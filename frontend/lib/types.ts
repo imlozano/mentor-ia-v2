@@ -35,7 +35,6 @@ export type TipoFuente = "pdf" | "txt" | "md" | "image";
 
 export interface DocumentoIndexado {
   nombre_archivo: string;
-  source_path: string;
   tipo_fuente: TipoFuente;
   total_chunks: number;
 }
@@ -50,6 +49,7 @@ export interface UploadResponse {
   status: "ok";
   archivo: string;
   chunks_ingresados: number;
+  aviso?: string | null;
 }
 
 export interface OcrResponse {

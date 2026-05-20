@@ -86,13 +86,14 @@ export function StudyAssistant() {
     setError(null);
     setUploading(true);
     try {
-      await uploadDocument(file);
+      const res = await uploadDocument(file);
       await refreshDocs();
+      const aviso = res.aviso ? ` ${res.aviso}` : "";
       setMessages((prev) => [
         ...prev,
         {
           role: "agent",
-          content: `Documento ${file.name} indexado correctamente.`,
+          content: `Documento ${file.name} indexado correctamente.${aviso}`,
           sources: [],
           origen: "modelo",
         },

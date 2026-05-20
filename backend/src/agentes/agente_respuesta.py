@@ -5,6 +5,7 @@ from loguru import logger
 from src.models import Fuente, QueryResponse
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
+from src.settings import Settings
 
 
 class AgenteRespuesta:
@@ -12,18 +13,21 @@ class AgenteRespuesta:
         self,
         qdrant_client: QdrantService,
         openai_service: OpenAIService,
+        settings: Settings,
     ) -> None:
         self._qdrant = qdrant_client
         self._openai = openai_service
+        self._settings = settings
 
     async def responder(
         self,
         pregunta: str,
         top_k: int = 5,
         umbral_score: float = 0.55,
+        session_id: str | None = None,
     ) -> QueryResponse:
         vector = await self._openai.embed_query(pregunta)
-        hits = await self._qdrant.query(vector=vector, limit=top_k)
+        hits = await self._qdrant.query(vector=vector, limit=top_k, session_id=session_id)
         fuentes_filtradas = [hit for hit in hits if (hit.score or 0.0) >= umbral_score]
 
         if fuentes_filtradas:
@@ -38,7 +42,9 @@ class AgenteRespuesta:
                 f"Contexto:\n{contexto}\n\n"
                 f"Pregunta:\n{pregunta}\n"
             )
-            respuesta = await self._openai.generate(prompt=prompt)
+            respuesta = await self._openai.generate(
+                prompt=prompt, max_tokens=self._settings.openai_max_tokens_chat
+            )
             return QueryResponse(
                 respuesta=respuesta,
                 origen="rag",
@@ -48,7 +54,8 @@ class AgenteRespuesta:
 
         logger.info("query sin fuentes sobre umbral, usando modelo base")
         respuesta = await self._openai.generate(
-            prompt=f"Responde en español de forma precisa y breve:\n\n{pregunta}"
+            prompt=f"Responde en español de forma precisa y breve:\n\n{pregunta}",
+            max_tokens=self._settings.openai_max_tokens_chat,
         )
         return QueryResponse(
             respuesta=respuesta,

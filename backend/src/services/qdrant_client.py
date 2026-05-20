@@ -38,19 +38,50 @@ class QdrantService:
         names = {c.name for c in existing.collections}
         if self.collection in names:
             logger.debug("qdrant: colección '{}' ya existe", self.collection)
-            return
+        else:
+            await self._client.create_collection(
+                collection_name=self.collection,
+                vectors_config=qmodels.VectorParams(
+                    size=self._settings.embedding_dim,
+                    distance=qmodels.Distance.COSINE,
+                ),
+            )
+            logger.info(
+                "qdrant: colección '{}' creada ({}d, COSINE)",
+                self.collection,
+                self._settings.embedding_dim,
+            )
 
-        await self._client.create_collection(
-            collection_name=self.collection,
-            vectors_config=qmodels.VectorParams(
-                size=self._settings.embedding_dim,
-                distance=qmodels.Distance.COSINE,
-            ),
-        )
-        logger.info(
-            "qdrant: colección '{}' creada ({}d, COSINE)",
-            self.collection,
-            self._settings.embedding_dim,
+        # Siempre (también sobre colecciones preexistentes en producción):
+        # garantiza el índice de payload usado por el filtro de sesión.
+        await self._ensure_session_index()
+
+    async def _ensure_session_index(self) -> None:
+        """Índice de payload sobre session_id para que el filtro sea eficiente.
+
+        Idempotente: si el índice ya existe, Qdrant lo ignora. No bloquea el
+        arranque si falla (el filtro funciona igual, solo más lento).
+        """
+        try:
+            await self._client.create_payload_index(
+                collection_name=self.collection,
+                field_name="session_id",
+                field_schema=qmodels.PayloadSchemaType.KEYWORD,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("qdrant: no se pudo crear índice session_id: {!r}", exc)
+
+    @staticmethod
+    def _session_filter(session_id: str | None) -> qmodels.Filter | None:
+        if not session_id:
+            return None
+        return qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="session_id",
+                    match=qmodels.MatchValue(value=session_id),
+                )
+            ]
         )
 
     async def ping(self, timeout: float = 2.0) -> bool:
@@ -72,22 +103,28 @@ class QdrantService:
         vector: list[float],
         limit: int,
         score_threshold: float | None = None,
+        session_id: str | None = None,
     ) -> list[qmodels.ScoredPoint]:
         result = await self._client.query_points(
             collection_name=self.collection,
             query=vector,
             limit=limit,
             score_threshold=score_threshold,
+            query_filter=self._session_filter(session_id),
             with_payload=True,
         )
         return result.points
 
-    async def scroll_all(self, batch: int = 256) -> AsyncIterator[qmodels.Record]:
-        """Itera sobre todos los puntos de la colección."""
+    async def scroll_all(
+        self, batch: int = 256, session_id: str | None = None
+    ) -> AsyncIterator[qmodels.Record]:
+        """Itera sobre los puntos de la colección (filtrados por sesión si se da)."""
         offset: Any = None
+        scroll_filter = self._session_filter(session_id)
         while True:
             records, offset = await self._client.scroll(
                 collection_name=self.collection,
+                scroll_filter=scroll_filter,
                 limit=batch,
                 offset=offset,
                 with_payload=True,

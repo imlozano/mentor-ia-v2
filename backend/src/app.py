@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
-from starlette.responses import Response
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.responses import JSONResponse, Response
 
 from src.agentes.agente_extraccion import AgenteExtraccion
 from src.agentes.agente_plan_repaso import AgentePlanRepaso
@@ -28,18 +31,18 @@ from src.services.make_webhook import MakeWebhookService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import get_settings
+from src.utils.safe_filename import safe_filename
+from src.utils.session_id import require_session_id
+from src.utils.upload_policy import IMAGE_EXTENSIONS, enforce_size, validate_upload
 
 VERSION = "0.1.0"
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
-MAX_PDF_BYTES = 25 * 1024 * 1024
-SUPPORTED_UPLOAD_EXTENSIONS = {".pdf", ".txt", ".md", ".png", ".jpg", ".jpeg"}
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+
+settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    settings = get_settings()
 
     app.state.openai = OpenAIService(settings)
     app.state.qdrant = QdrantService(settings)
@@ -52,12 +55,14 @@ async def lifespan(app: FastAPI):
     app.state.agente_respuesta = AgenteRespuesta(
         qdrant_client=app.state.qdrant,
         openai_service=app.state.openai,
+        settings=settings,
     )
     app.state.agente_plan_repaso = AgentePlanRepaso(
         qdrant_client=app.state.qdrant,
         openai_service=app.state.openai,
         agente_extraccion=app.state.agente_extraccion,
         make_webhook=app.state.make,
+        settings=settings,
     )
 
     logger.bind(version=VERSION, cors_origins=settings.cors_origins).info(
@@ -85,13 +90,36 @@ async def lifespan(app: FastAPI):
         logger.info("Mentor IA backend detenido")
 
 
+# ───────────────────────── Rate limiting ─────────────────────────
+# Clave = IP + X-Session-ID: limita por origen real aunque varias sesiones
+# compartan IP (NAT) y aunque un cliente rote el session_id manteniendo IP.
+def _rate_limit_key(request: Request) -> str:
+    ip = get_remote_address(request)
+    sid = request.headers.get("X-Session-ID") or "anon"
+    return f"{ip}:{sid}"
+
+
+limiter = Limiter(key_func=_rate_limit_key, enabled=settings.rate_limit_enabled)
+
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    logger.warning("rate limit excedido: key={}", _rate_limit_key(request))
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Demasiadas solicitudes en poco tiempo. "
+            "Espera un momento antes de reintentar."
+        },
+    )
+
+
 app = FastAPI(
     title="Mentor IA API",
     version=VERSION,
     lifespan=lifespan,
 )
-
-settings = get_settings()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,24 +186,21 @@ async def health(request: Request) -> HealthResponse:
 
 
 @app.post("/upload-document", response_model=UploadResponse)
+@limiter.limit(lambda: settings.rate_limit_upload)
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     x_filename: str | None = Header(default=None),
+    session_id: str = Depends(require_session_id),
 ) -> UploadResponse:
-    from src.utils.safe_filename import safe_filename
-
     suggested_name = x_filename or file.filename or "archivo_sin_nombre"
-    safe_name = safe_filename(suggested_name)
+    # Valida extensión y, si el cliente envió Content-Length, tamaño.
+    safe_name = validate_upload(suggested_name, file.size, settings)
     suffix = Path(safe_name).suffix.lower()
-    if suffix not in SUPPORTED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Extensión no soportada: {suffix}")
 
     content = await file.read()
-    if suffix in IMAGE_EXTENSIONS and len(content) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=400, detail="Imagen supera tamaño máximo de 10 MB")
-    if suffix == ".pdf" and len(content) > MAX_PDF_BYTES:
-        raise HTTPException(status_code=400, detail="PDF supera tamaño máximo de 25 MB")
+    # Verificación de tamaño real (cubre clientes que no envían tamaño).
+    enforce_size(suffix, content, settings)
 
     docs_dir = settings.base_docs_dir
     docs_dir.mkdir(parents=True, exist_ok=True)
@@ -183,18 +208,26 @@ async def upload_document(
     target_path.write_bytes(content)
 
     agente_extraccion: AgenteExtraccion = request.app.state.agente_extraccion
-    chunks_ingresados = await agente_extraccion.ingestar_documento(target_path)
+    resultado = await agente_extraccion.ingestar_documento(target_path, session_id)
 
-    return UploadResponse(status="ok", archivo=safe_name, chunks_ingresados=chunks_ingresados)
+    return UploadResponse(
+        status="ok",
+        archivo=safe_name,
+        chunks_ingresados=resultado.chunks_ingresados,
+        aviso=resultado.aviso,
+    )
 
 
 @app.get("/documentos-indexados", response_model=DocumentosResponse)
-async def documentos_indexados(request: Request) -> DocumentosResponse:
+async def documentos_indexados(
+    request: Request,
+    session_id: str = Depends(require_session_id),
+) -> DocumentosResponse:
     qdrant: QdrantService = request.app.state.qdrant
     grouped: dict[str, dict[str, int | str]] = {}
     total_chunks = 0
 
-    async for record in qdrant.scroll_all():
+    async for record in qdrant.scroll_all(session_id=session_id):
         payload = record.payload or {}
         source_path = str(payload.get("source_path") or "")
         if not source_path:
@@ -204,7 +237,6 @@ async def documentos_indexados(request: Request) -> DocumentosResponse:
             source_path,
             {
                 "nombre_archivo": str(payload.get("nombre_archivo") or Path(source_path).name),
-                "source_path": source_path,
                 "tipo_fuente": str(payload.get("tipo_fuente") or "txt"),
                 "total_chunks": 0,
             },
@@ -215,7 +247,6 @@ async def documentos_indexados(request: Request) -> DocumentosResponse:
     documentos = [
         DocumentoIndexado(
             nombre_archivo=str(item["nombre_archivo"]),
-            source_path=str(item["source_path"]),
             tipo_fuente=str(item["tipo_fuente"]),
             total_chunks=int(item["total_chunks"]),
         )
@@ -231,13 +262,19 @@ async def documentos_indexados(request: Request) -> DocumentosResponse:
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query_endpoint(request: Request, body: QueryRequest) -> QueryResponse:
+@limiter.limit(lambda: settings.rate_limit_query)
+async def query_endpoint(
+    request: Request,
+    body: QueryRequest,
+    session_id: str = Depends(require_session_id),
+) -> QueryResponse:
     agente_respuesta: AgenteRespuesta = request.app.state.agente_respuesta
     try:
         return await agente_respuesta.responder(
             pregunta=body.pregunta,
             top_k=settings.rag_top_k,
             umbral_score=settings.rag_score_threshold,
+            session_id=session_id,
         )
     except HTTPException:
         raise
@@ -250,12 +287,12 @@ async def query_endpoint(request: Request, body: QueryRequest) -> QueryResponse:
 
 
 @app.post("/plan-repaso", response_model=PlanRepasoResponse)
+@limiter.limit(lambda: settings.rate_limit_plan)
 async def plan_repaso_endpoint(
     request: Request,
     file: UploadFile | None = File(default=None),
+    session_id: str = Depends(require_session_id),
 ) -> PlanRepasoResponse:
-    from src.utils.safe_filename import safe_filename
-
     agente_plan: AgentePlanRepaso = request.app.state.agente_plan_repaso
     content_type = request.headers.get("content-type", "")
 
@@ -289,11 +326,14 @@ async def plan_repaso_endpoint(
         tema = tema_raw
         email = email_raw or None
         if file is not None:
-            safe_name = safe_filename(file.filename or "documento_plan.pdf")
+            # Mismo control de extensión/tamaño que /upload-document.
+            safe_name = validate_upload(file.filename or "documento_plan.pdf", file.size, settings)
+            content = await file.read()
+            enforce_size(Path(safe_name).suffix.lower(), content, settings)
             docs_dir = settings.base_docs_dir
             docs_dir.mkdir(parents=True, exist_ok=True)
             archivo_guardado = docs_dir / safe_name
-            archivo_guardado.write_bytes(await file.read())
+            archivo_guardado.write_bytes(content)
 
     try:
         return await agente_plan.generar_plan(
@@ -301,6 +341,7 @@ async def plan_repaso_endpoint(
             fecha_inicio=fecha_inicio,
             email=email,
             archivo=archivo_guardado,
+            session_id=session_id,
         )
     except HTTPException:
         raise
@@ -313,20 +354,23 @@ async def plan_repaso_endpoint(
 
 
 @app.post("/ocr-imagen", response_model=OcrResponse)
+@limiter.limit(lambda: settings.rate_limit_ocr)
 async def ocr_imagen_endpoint(request: Request, file: UploadFile = File(...)) -> OcrResponse:
+    # /ocr-imagen no toca Qdrant: solo se limita por tasa, no requiere sesión.
     filename = file.filename or "imagen"
-    suffix = Path(filename).suffix.lower()
+    suffix = Path(safe_filename(filename)).suffix.lower()
     if suffix not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Solo se admiten imágenes PNG/JPG/JPEG.")
 
     content = await file.read()
-    if len(content) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=400, detail="Imagen supera tamaño máximo de 10 MB")
+    enforce_size(suffix, content, settings)
 
     mime = "image/png" if suffix == ".png" else "image/jpeg"
     openai_service: OpenAIService = request.app.state.openai
     try:
-        texto = await openai_service.extract_text_from_image(content, mime=mime)
+        texto = await openai_service.extract_text_from_image(
+            content, mime=mime, max_tokens=settings.openai_max_tokens_ocr
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error("ocr-imagen failed: {!r}", exc)
         raise HTTPException(
