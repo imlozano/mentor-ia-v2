@@ -147,7 +147,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trivy — scan de vulnerabilidades en la imagen
+      - name: Trivy — tabla en logs (informativa, no falla)
+        # Imprime los hallazgos en formato legible para que aparezcan en
+        # los logs del workflow. exit-code=0 → no rompe el job aquí, solo
+        # da visibilidad. El step siguiente (SARIF) es el que falla en HIGH+.
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: mentor-ia-backend:ci-${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Trivy — SARIF + fail en CVE HIGH/CRITICAL fijables
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: mentor-ia-backend:ci-${{ github.sha }}
