@@ -191,6 +191,19 @@ class QdrantService:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("qdrant: delete legacy por nombre_archivo falló: {!r}", exc)
 
+    async def delete_by_session(self, session_id: str) -> None:
+        """Elimina todos los puntos de una sesión. Nunca toca otras sesiones."""
+        must = [
+            qmodels.FieldCondition(
+                key="session_id",
+                match=qmodels.MatchValue(value=session_id),
+            ),
+        ]
+        await self._client.delete(
+            collection_name=self.collection,
+            points_selector=qmodels.FilterSelector(filter=qmodels.Filter(must=must)),
+        )
+
     async def query(
         self,
         vector: list[float],

@@ -242,15 +242,14 @@ Layout de dos columnas en desktop (`md+`), apilado en mobile:
   legal, siempre visible independiente del sub-tab activo a la
   izquierda.
 
-Sugerencias hardcoded a usar:
+Sugerencias dinámicas (`lib/suggestions.ts` → `buildSuggestions`):
 
-```typescript
-const EXAMPLE_QUERIES = [
-  "¿Cuál es la historia de C y C++?",
-  "Técnicas de prompt engineering",
-  "Atajos básicos de terminal Linux",
-];
-```
+- Con documento seleccionado: acciones documentales (resumen, conceptos clave, preguntas tipo examen, repaso).
+- Sin selección pero con docs: invitar a seleccionar en pestaña Documentos.
+- Sin docs: invitar a subir.
+
+`DocumentsList`: botón eliminar por fila; botón «Vaciar» con `confirm()`.
+Al borrar el documento seleccionado, limpiar `selectedDocument` (desaparece banner «Consultando»).
 
 ### 6.4 Chat (`chat-message.tsx` + `chat-composer.tsx`)
 

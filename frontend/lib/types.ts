@@ -72,4 +72,19 @@ export interface HealthResponse {
 }
 
 
+export interface DeleteDocumentoResponse {
+  status: "ok";
+  document_id: string;
+  nombre_archivo: string;
+  chunks_eliminados: number;
+  archivo_local_eliminado: boolean;
+}
+
+export interface VaciarDocumentosResponse {
+  status: "ok";
+  documentos_eliminados: number;
+  chunks_eliminados: number;
+  archivos_locales_eliminados: number;
+}
+
 export type QueryModo = "auto" | "documento" | "general";

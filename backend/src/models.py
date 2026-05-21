@@ -84,3 +84,19 @@ class UploadResponse(BaseModel):
     chunks_ingresados: int
     document_id: str | None = None
     aviso: str | None = None
+
+
+class DeleteDocumentoResponse(BaseModel):
+    status: Literal["ok"]
+    document_id: str
+    nombre_archivo: str
+    chunks_eliminados: int
+    archivo_local_eliminado: bool
+
+
+class VaciarDocumentosResponse(BaseModel):
+    status: Literal["ok"]
+    documentos_eliminados: int
+    chunks_eliminados: int
+    archivos_locales_eliminados: int
+

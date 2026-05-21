@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     rate_limit_upload: str = "10/minute"
     rate_limit_plan: str = "5/minute"
     rate_limit_ocr: str = "10/minute"
+    rate_limit_delete: str = "30/minute"
+    rate_limit_query_ip: str = "20/minute"
+    rate_limit_upload_ip: str = "10/minute"
+    rate_limit_plan_ip: str = "5/minute"
+    rate_limit_ocr_ip: str = "10/minute"
+    rate_limit_delete_ip: str = "30/minute"
 
     # --- OCR de PDF escaneado ---
     # Tope de páginas que se mandan a OpenAI Vision por documento. Evita que

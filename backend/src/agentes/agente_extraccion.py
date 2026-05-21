@@ -18,6 +18,7 @@ from src.settings import Settings
 from src.utils.chunking import chunkear, chunkear_markdown
 from src.utils.document_id import compute_document_id, normalize_source_path
 from src.utils.pdf_reader import extraer_texto_pdf, extraer_texto_pdf_por_paginas
+from src.utils.upload_files import unlink_upload
 from src.utils.upload_policy import IMAGE_EXTENSIONS, SUPPORTED_UPLOAD_EXTENSIONS
 
 _SUPPORTED_SUFFIXES = SUPPORTED_UPLOAD_EXTENSIONS
@@ -189,7 +190,10 @@ class AgenteExtraccion:
             points.append(qmodels.PointStruct(id=point_id, vector=vector, payload=payload))
 
         await self._qdrant.upsert_points(points)
-        return len(points)
+        ingested = len(points)
+        if session_id and ingested > 0:
+            unlink_upload(self._settings, source_name)
+        return ingested
 
     async def _ocr_pdf_with_openai(self, path: Path) -> tuple[str, str | None]:
         pdf = pdfium.PdfDocument(str(path))

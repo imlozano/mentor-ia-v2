@@ -174,6 +174,9 @@ def test_documentos_indexados_filtra_por_session_id(client):
 
 
 def test_query_dispara_429_al_exceder_limite(client):
+    app.state.limiter.enabled = True
+    if hasattr(app.state.limiter, "_storage"):
+        app.state.limiter._storage.storage.clear()
     app.state.agente_respuesta = FakeAgenteRespuesta()
     sid = _uuid()  # misma sesión → mismo bucket de rate limit
     headers = {"X-Session-ID": sid}

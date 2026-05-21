@@ -18,6 +18,7 @@ from src.agentes.agente_respuesta import AgenteRespuesta
 from src.exceptions import AppError
 from src.logger import setup_logging
 from src.models import (
+    DeleteDocumentoResponse,
     DocumentoIndexado,
     DocumentosResponse,
     HealthResponse,
@@ -27,7 +28,10 @@ from src.models import (
     QueryRequest,
     QueryResponse,
     UploadResponse,
+    VaciarDocumentosResponse,
 )
+from src.services.document_admin import DocumentAdminService
+from src.services.document_retrieval import DocumentRetrievalService
 from src.services.make_webhook import MakeWebhookService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
@@ -91,6 +95,12 @@ async def lifespan(app: FastAPI):
         make_webhook=app.state.make,
         settings=settings,
     )
+    app.state.document_retrieval = DocumentRetrievalService(app.state.qdrant)
+    app.state.document_admin = DocumentAdminService(
+        qdrant=app.state.qdrant,
+        retrieval=app.state.document_retrieval,
+        settings=settings,
+    )
 
     logger.bind(version=VERSION, cors_origins=settings.cors_origins).info(
         "Mentor IA backend iniciando"
@@ -129,6 +139,17 @@ def _rate_limit_key(request: Request) -> str:
 limiter = Limiter(key_func=_rate_limit_key, enabled=settings.rate_limit_enabled)
 
 
+def _expensive_limits_ip_session(ip_limit: str, session_limit: str):
+    """Doble tope: por IP (anti-evasión) y por IP+sesión."""
+
+    def decorator(fn):
+        fn = limiter.limit(ip_limit, key_func=get_remote_address)(fn)
+        fn = limiter.limit(session_limit)(fn)
+        return fn
+
+    return decorator
+
+
 def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     logger.warning("rate limit excedido: key={}", _rate_limit_key(request))
     return JSONResponse(
@@ -153,7 +174,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
 )
@@ -213,7 +234,7 @@ async def health(request: Request) -> HealthResponse:
 
 
 @app.post("/upload-document", response_model=UploadResponse)
-@limiter.limit(lambda: settings.rate_limit_upload)
+@_expensive_limits_ip_session(lambda: settings.rate_limit_upload_ip, lambda: settings.rate_limit_upload)
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
@@ -291,8 +312,51 @@ async def documentos_indexados(
     )
 
 
+
+
+@app.delete("/documentos", response_model=VaciarDocumentosResponse)
+@_expensive_limits_ip_session(lambda: settings.rate_limit_delete_ip, lambda: settings.rate_limit_delete)
+async def vaciar_documentos(
+    request: Request,
+    session_id: str = Depends(require_session_id),
+) -> VaciarDocumentosResponse:
+    admin: DocumentAdminService = request.app.state.document_admin
+    logger.info("DELETE /documentos session_id={}", session_id)
+    result = await admin.vaciar_sesion(session_id)
+    return VaciarDocumentosResponse(
+        status="ok",
+        documentos_eliminados=result.documentos_eliminados,
+        chunks_eliminados=result.chunks_eliminados,
+        archivos_locales_eliminados=result.archivos_locales_eliminados,
+    )
+
+
+@app.delete("/documentos/{document_id}", response_model=DeleteDocumentoResponse)
+@_expensive_limits_ip_session(lambda: settings.rate_limit_delete_ip, lambda: settings.rate_limit_delete)
+async def delete_documento(
+    request: Request,
+    document_id: str,
+    session_id: str = Depends(require_session_id),
+) -> DeleteDocumentoResponse:
+    admin: DocumentAdminService = request.app.state.document_admin
+    logger.info("DELETE /documentos/{} session_id={}", document_id, session_id)
+    result = await admin.delete_one(session_id, document_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No encontré ese documento en esta sesión.",
+        )
+    return DeleteDocumentoResponse(
+        status="ok",
+        document_id=result.document_id,
+        nombre_archivo=result.nombre_archivo,
+        chunks_eliminados=result.chunks_eliminados,
+        archivo_local_eliminado=result.archivo_local_eliminado,
+    )
+
+
 @app.post("/query", response_model=QueryResponse)
-@limiter.limit(lambda: settings.rate_limit_query)
+@_expensive_limits_ip_session(lambda: settings.rate_limit_query_ip, lambda: settings.rate_limit_query)
 async def query_endpoint(
     request: Request,
     body: QueryRequest,
@@ -323,7 +387,7 @@ async def query_endpoint(
 
 
 @app.post("/plan-repaso", response_model=PlanRepasoResponse)
-@limiter.limit(lambda: settings.rate_limit_plan)
+@_expensive_limits_ip_session(lambda: settings.rate_limit_plan_ip, lambda: settings.rate_limit_plan)
 async def plan_repaso_endpoint(
     request: Request,
     file: UploadFile | None = File(default=None),
@@ -387,7 +451,7 @@ async def plan_repaso_endpoint(
 
 
 @app.post("/ocr-imagen", response_model=OcrResponse)
-@limiter.limit(lambda: settings.rate_limit_ocr)
+@_expensive_limits_ip_session(lambda: settings.rate_limit_ocr_ip, lambda: settings.rate_limit_ocr)
 async def ocr_imagen_endpoint(request: Request, file: UploadFile = File(...)) -> OcrResponse:
     # /ocr-imagen no toca Qdrant: solo se limita por tasa, no requiere sesión.
     filename = file.filename or "imagen"

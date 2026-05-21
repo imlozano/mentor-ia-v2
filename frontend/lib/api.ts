@@ -8,6 +8,8 @@ import type {
   QueryModo,
   QueryResponse,
   UploadResponse,
+  DeleteDocumentoResponse,
+  VaciarDocumentosResponse,
 } from "@/lib/types";
 import { getSessionId } from "@/lib/session";
 
@@ -160,6 +162,19 @@ export function ocrImage(file: File): Promise<OcrResponse> {
 export function getIndexedDocuments(): Promise<DocumentosResponse> {
   return request<DocumentosResponse>("/documentos-indexados");
 }
+
+export function deleteDocument(documentId: string): Promise<DeleteDocumentoResponse> {
+  return request<DeleteDocumentoResponse>(`/documentos/${encodeURIComponent(documentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function clearAllDocuments(): Promise<VaciarDocumentosResponse> {
+  return request<VaciarDocumentosResponse>("/documentos", {
+    method: "DELETE",
+  });
+}
+
 
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");

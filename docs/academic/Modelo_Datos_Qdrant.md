@@ -196,7 +196,9 @@ Cada punto que se inserta en Qdrant lleva el siguiente payload:
   "chunk_index": 0,
   "embedding_model": "text-embedding-3-large",
   "embedding_dim": 768,
-  "schema_version": "1.0",
+  "schema_version": "1.2",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "document_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "created_at": "2026-05-17T02:14:30Z"
 }
 ```
@@ -210,6 +212,8 @@ Cada punto que se inserta en Qdrant lleva el siguiente payload:
 | `nombre_archivo`  | string  | Nombre del archivo sin path, usado en la UI                                        |
 | `tipo_fuente`     | string  | Uno de `pdf`, `txt`, `md`, `image`. Usado para iconografía en la lista de docs    |
 | `chunk_index`     | integer | Posición del chunk dentro del documento original (0, 1, 2...)                      |
+| `session_id`      | string  | UUIDv4 del visitante (header `X-Session-ID`); filtra consultas y borrados          |
+| `document_id`     | string  | UUIDv5 estable por `session_id` + `nombre_archivo`; agrupa chunks y borrado      |
 | `embedding_model` | string  | Modelo que generó el vector. Útil para auditoría y migraciones progresivas         |
 | `embedding_dim`   | integer | Dimensión del vector. Validación contra la `size` configurada en la colección      |
 | `schema_version` | string  | Versión del esquema de payload, permite evolución sin romper datos viejos          |
@@ -220,7 +224,7 @@ Cada punto que se inserta en Qdrant lleva el siguiente payload:
 El `point_id` es un **UUIDv5 determinístico** derivado de:
 
 ```python
-uuid.uuid5(uuid.NAMESPACE_URL, f"{source_path}|{chunk_index}")
+uuid.uuid5(uuid.NAMESPACE_URL, f"{session_id}|{source_path}|{chunk_index}")
 ```
 
 Esto garantiza que **el mismo chunk del mismo documento siempre produce
@@ -233,9 +237,8 @@ simplemente reemplaza sus chunks existentes.
 - El endpoint `/query` devuelve los campos `nombre_archivo`,
   `chunk_index`, el score y un excerpt de `texto` como **fuentes** al
   frontend.
-- El endpoint `/documentos-indexados` hace `scroll` sobre toda la
-  colección agrupando por `source_path` para listar los documentos
-  únicos con su conteo de chunks y `tipo_fuente`.
+- El endpoint `/documentos-indexados` hace `scroll` filtrado por
+  `session_id` y agrupa por `document_id` para listar documentos de la sesión.
 - Los campos `embedding_model`, `embedding_dim`, `schema_version` y
   `created_at` no se exponen al frontend; sirven para auditoría
   interna y para soportar evoluciones futuras del esquema.
@@ -317,14 +320,12 @@ Implementar los índices requiere ~30 minutos: añadir las llamadas a
 Qdrant. Sin migración de datos: los índices se construyen en vivo
 sobre los puntos existentes.
 
-### 6.3 Identificador único de documento (opcional)
+### 6.3 Identificador único de documento (implementado — schema 1.2)
 
-Como mejora adicional, se podría añadir un campo `document_id` con
-UUIDv5 derivado solo de `source_path` (sin chunk_index) para
-identificar el documento entero de forma estable, facilitando
-agrupaciones y borrados masivos por documento. No es estrictamente
-necesario porque `source_path` ya cumple ese rol como clave de
-agrupación natural, pero un UUID es más estable frente a renombrados.
+El campo `document_id` es un UUIDv5 derivado de `session_id|nombre_archivo`.
+Permite listar, consultar y borrar (`DELETE /documentos/{document_id}`) un
+documento completo sin depender solo de `source_path`. El borrado en Qdrant
+usa siempre filtro `session_id` + `document_id`.
 
 ---
 

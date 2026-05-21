@@ -108,9 +108,8 @@ implementación.
 Cambios aplicados para blindar el despliegue público (`api.iamentor.tech`)
 sin introducir autenticación (CLAUDE.md §2.1):
 
-- **Rate limiting** (`slowapi`) en `/query`, `/upload-document`, `/plan-repaso`
-  y `/ocr-imagen`, por IP + `X-Session-ID`. Configurable por env
-  (`RATE_LIMIT_*`). Mitiga el abuso de coste de créditos OpenAI.
+- **Rate limiting** (`slowapi`) en endpoints caros y borrado: tope por
+  **IP** (`RATE_LIMIT_*_IP`) y por **IP + `X-Session-ID`** (`RATE_LIMIT_*`).
 - **Aislamiento por `session_id` anónimo**: el frontend genera un UUIDv4 y lo
   envía en `X-Session-ID`. Los documentos, consultas y planes se filtran por
   ese id en Qdrant; los documentos sin `session_id` (legacy) quedan aislados.
@@ -120,8 +119,18 @@ sin introducir autenticación (CLAUDE.md §2.1):
   `max_tokens` acotados en todas las llamadas OpenAI.
 - `source_path` deja de exponerse en `/documentos-indexados`.
 
-Pendiente (Sprint 2): política de retención/borrado de archivos subidos,
-unificación del plan en una sola llamada LLM, `pnpm audit` bloqueante.
+**Sprint 2 (2026-05-21):** retención y borrado de documentos por sesión.
+Tras ingesta exitosa en Qdrant se elimina el archivo en `./data/uploads`.
+`DELETE /documentos/{document_id}` y `DELETE /documentos` borran vectores
+solo con filtro `session_id` (+ `document_id` en el caso individual). Rate
+limit con tope adicional por IP (`RATE_LIMIT_*_IP`) para que rotar
+`X-Session-ID` no multiplique el presupuesto OpenAI.
+
+**Riesgo residual:** `upload_dir` usa nombres planos sin prefijo de sesión;
+dos visitantes con el mismo nombre de archivo comparten ruta en disco
+(Qdrant sigue aislado por `session_id`).
+
+Pendiente: unificación del plan en una sola llamada LLM, `pnpm audit` bloqueante.
 
 ## 5. Histórico de CVEs resueltos
 

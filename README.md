@@ -155,9 +155,16 @@ despliegue sea seguro sin contradecir ese alcance, se aplican estas defensas:
   envía en el header `X-Session-ID`. Documentos, consultas y planes se filtran
   por ese identificador en Qdrant: los datos de un visitante nunca se mezclan
   con los de otro. No es autenticación ni identifica a una persona.
-- **Rate limiting** (`slowapi`) por IP + `X-Session-ID` en los endpoints que
-  consumen créditos de OpenAI (`/query`, `/upload-document`, `/plan-repaso`,
-  `/ocr-imagen`). Los límites son configurables por variable de entorno.
+- **Rate limiting** (`slowapi`) con doble tope **por IP** (anti-evasión al rotar
+  sesión) y **por IP + `X-Session-ID`** en `/query`, `/upload-document`,
+  `/plan-repaso`, `/ocr-imagen` y borrado de documentos. Configurable vía
+  `RATE_LIMIT_*` y `RATE_LIMIT_*_IP`.
+- **Consulta por documento:** el frontend envía `document_id` en `POST /query`
+  al seleccionar un archivo; el RAG filtra chunks por `session_id` + `document_id`.
+- **Borrado de datos:** `DELETE /documentos/{document_id}` y `DELETE /documentos`
+  (vaciar sesión) siempre filtran por `X-Session-ID`; no afectan otras sesiones.
+- **Retención en disco:** tras indexar en Qdrant, el archivo en `./data/uploads`
+  se elimina; el RAG consulta solo vectores en Qdrant.
 - **Validación uniforme de archivos** — extensión y tamaño (incluido TXT/MD),
   con saneado del nombre para prevenir *path traversal*.
 - **Tope de páginas OCR** por PDF escaneado, para acotar el coste de las

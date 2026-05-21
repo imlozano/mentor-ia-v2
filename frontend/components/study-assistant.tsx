@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, FileText, Sparkles, Trash2, Upload, X } from "lucide-react";
 
-import { askQuery, getIndexedDocuments, uploadDocument } from "@/lib/api";
+import {
+  askQuery,
+  clearAllDocuments,
+  deleteDocument,
+  getIndexedDocuments,
+  uploadDocument,
+} from "@/lib/api";
 import type { DocumentoIndexado, Fuente, MensajeHistorial, Origen } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,16 +19,11 @@ import { ChatMessageItem } from "@/components/chat-message";
 import { DocumentsList } from "@/components/documents-list";
 import { OcrUploader } from "@/components/ocr-uploader";
 import { EmptyState } from "@/components/empty-state";
+import { buildSuggestions, clearSelectionIfDeleted } from "@/lib/suggestions";
 
 type ChatMsg =
   | { role: "user"; content: string }
   | { role: "agent"; content: string; sources: Fuente[]; origen: Origen };
-
-const EXAMPLE_QUERIES = [
-  "¿Cuál es la historia de C y C++?",
-  "Técnicas principales de prompt engineering",
-  "Atajos básicos de la terminal Linux",
-];
 
 export function StudyAssistant() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -36,9 +37,16 @@ export function StudyAssistant() {
   const [selectedDocument, setSelectedDocument] = useState<DocumentoIndexado | null>(
     null,
   );
+  const [deleting, setDeleting] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const suggestions = useMemo(
+    () => buildSuggestions(docs, selectedDocument),
+    [docs, selectedDocument],
+  );
 
   useEffect(() => {
     void refreshDocs();
@@ -58,6 +66,47 @@ export function StudyAssistant() {
       setDocs(res.documentos);
     } catch {
       // silencioso: el StatusIndicator ya muestra estado del backend
+    }
+  }
+
+
+  async function handleDeleteDocument(doc: DocumentoIndexado) {
+    if (!window.confirm(`¿Eliminar "${doc.nombre_archivo}" de esta sesión?`)) {
+      return;
+    }
+    setError(null);
+    setDeleting(true);
+    try {
+      await deleteDocument(doc.document_id);
+      if (clearSelectionIfDeleted(selectedDocument?.document_id, doc.document_id)) {
+        setSelectedDocument(null);
+      }
+      await refreshDocs();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No fue posible eliminar el documento.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleClearAllDocuments() {
+    if (!window.confirm("¿Vaciar todos los documentos de esta sesión?")) {
+      return;
+    }
+    setError(null);
+    setClearing(true);
+    try {
+      await clearAllDocuments();
+      setSelectedDocument(null);
+      setDocs([]);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No fue posible vaciar los documentos.",
+      );
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -233,7 +282,7 @@ export function StudyAssistant() {
                         Sugerencias
                       </h4>
                       <div className="flex flex-col gap-1">
-                        {EXAMPLE_QUERIES.map((q) => (
+                        {suggestions.map((q) => (
                           <button
                             key={q}
                             type="button"
@@ -267,6 +316,9 @@ export function StudyAssistant() {
                           prev?.document_id === doc.document_id ? null : doc,
                         )
                       }
+                      onDelete={(doc) => void handleDeleteDocument(doc)}
+                      onClearAll={() => void handleClearAllDocuments()}
+                      clearing={clearing || deleting}
                     />
                   </div>
                 </ScrollArea>

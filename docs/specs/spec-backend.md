@@ -185,11 +185,19 @@ class UploadResponse(BaseModel):
 | Método | Ruta                       | Request                     | Response                | Notas |
 | ------ | -------------------------- | --------------------------- | ----------------------- | ----- |
 | GET    | `/health`                  | —                           | `HealthResponse`        | Ping liviano a Qdrant y OpenAI |
-| GET    | `/documentos-indexados`    | —                           | `DocumentosResponse`    | Scroll Qdrant, agrupa por `source_path` |
+| GET    | `/documentos-indexados`    | —                           | `DocumentosResponse`    | Scroll por `session_id`, agrupa por `document_id` |
+| DELETE | `/documentos`              | Header `X-Session-ID`       | `VaciarDocumentosResponse` | Borra todos los chunks de la sesión (`session_id` only) |
+| DELETE | `/documentos/{document_id}`| Header `X-Session-ID`       | `DeleteDocumentoResponse` | Borra por `session_id` + `document_id`; 404 si no existe en sesión |
 | POST   | `/upload-document`         | `multipart/form-data` (campo `file`) | `UploadResponse` | Guarda en disco y dispara `AgenteExtraccion` |
 | POST   | `/query`                   | `QueryRequest`              | `QueryResponse`         |       |
 | POST   | `/plan-repaso`             | `PlanRepasoRequest` o multipart con archivo + tema | `PlanRepasoResponse` | Acepta JSON o multipart |
 | POST   | `/ocr-imagen`              | `multipart/form-data` (campo `file`) | `OcrResponse` | OCR con OpenAI Vision multimodal, no indexa |
+
+### 5.0 Borrado y retención (Sprint 2)
+
+- Tras `upsert` exitoso en Qdrant, eliminar archivo en `upload_dir` (RAG solo lee Qdrant).
+- Si falla extracción/embed/upsert, conservar el archivo local.
+- Prohibido borrar en Qdrant sin filtro `session_id`.
 
 ### 5.1 Detalles por endpoint
 
