@@ -99,4 +99,3 @@ class VaciarDocumentosResponse(BaseModel):
     documentos_eliminados: int
     chunks_eliminados: int
     archivos_locales_eliminados: int
-

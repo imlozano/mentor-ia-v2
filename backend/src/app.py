@@ -234,7 +234,9 @@ async def health(request: Request) -> HealthResponse:
 
 
 @app.post("/upload-document", response_model=UploadResponse)
-@_expensive_limits_ip_session(lambda: settings.rate_limit_upload_ip, lambda: settings.rate_limit_upload)
+@_expensive_limits_ip_session(
+    lambda: settings.rate_limit_upload_ip, lambda: settings.rate_limit_upload
+)
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
@@ -312,10 +314,10 @@ async def documentos_indexados(
     )
 
 
-
-
 @app.delete("/documentos", response_model=VaciarDocumentosResponse)
-@_expensive_limits_ip_session(lambda: settings.rate_limit_delete_ip, lambda: settings.rate_limit_delete)
+@_expensive_limits_ip_session(
+    lambda: settings.rate_limit_delete_ip, lambda: settings.rate_limit_delete
+)
 async def vaciar_documentos(
     request: Request,
     session_id: str = Depends(require_session_id),
@@ -332,7 +334,9 @@ async def vaciar_documentos(
 
 
 @app.delete("/documentos/{document_id}", response_model=DeleteDocumentoResponse)
-@_expensive_limits_ip_session(lambda: settings.rate_limit_delete_ip, lambda: settings.rate_limit_delete)
+@_expensive_limits_ip_session(
+    lambda: settings.rate_limit_delete_ip, lambda: settings.rate_limit_delete
+)
 async def delete_documento(
     request: Request,
     document_id: str,
@@ -356,7 +360,9 @@ async def delete_documento(
 
 
 @app.post("/query", response_model=QueryResponse)
-@_expensive_limits_ip_session(lambda: settings.rate_limit_query_ip, lambda: settings.rate_limit_query)
+@_expensive_limits_ip_session(
+    lambda: settings.rate_limit_query_ip, lambda: settings.rate_limit_query
+)
 async def query_endpoint(
     request: Request,
     body: QueryRequest,
