@@ -186,9 +186,7 @@ class QdrantService:
             try:
                 await self._client.delete(
                     collection_name=self.collection,
-                    points_selector=qmodels.FilterSelector(
-                        filter=qmodels.Filter(must=legacy_must)
-                    ),
+                    points_selector=qmodels.FilterSelector(filter=qmodels.Filter(must=legacy_must)),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("qdrant: delete legacy por nombre_archivo falló: {!r}", exc)

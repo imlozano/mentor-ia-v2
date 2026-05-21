@@ -186,16 +186,16 @@ class AgenteRespuesta:
             above = [c for c in chunks if (c.score or 0.0) >= umbral_score]
             if above:
                 chunks = above
-                detalle = "Respuesta construida con recuperación semántica (RAG) filtrada por documento."
+                detalle = (
+                    "Respuesta construida con recuperación semántica (RAG) filtrada por documento."
+                )
             else:
                 chunks = await self._doc_retrieval.get_representative_chunks(
                     session_id or "", document_id, nombre_archivo, n=top_k
                 )
                 system = _SYSTEM_RAG_FALLBACK
                 use_fallback = True
-                detalle = (
-                    "Sin coincidencia exacta sobre umbral; respuesta con chunks del documento seleccionado."
-                )
+                detalle = "Sin coincidencia exacta sobre umbral; respuesta con chunks del documento seleccionado."
 
         if not chunks:
             all_chunks = await self._doc_retrieval.get_document_chunks(
@@ -227,8 +227,7 @@ class AgenteRespuesta:
 
         if use_fallback and not respuesta.lower().startswith("no encontr"):
             respuesta = (
-                "No encontré una coincidencia exacta, pero con base en el documento: "
-                + respuesta
+                "No encontré una coincidencia exacta, pero con base en el documento: " + respuesta
             )
 
         return QueryResponse(

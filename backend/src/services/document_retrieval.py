@@ -126,7 +126,10 @@ class DocumentRetrievalService:
                 return doc.document_id
             tokens = [t for t in re.split(r"[\s\-_]+", pregunta_norm) if len(t) > 2]
             doc_tokens = set(re.split(r"[\s\-_]+", doc_norm))
-            if len(tokens) >= 2 and sum(1 for t in tokens if t in doc_tokens) >= len(tokens) // 2 + 1:
+            if (
+                len(tokens) >= 2
+                and sum(1 for t in tokens if t in doc_tokens) >= len(tokens) // 2 + 1
+            ):
                 return doc.document_id
         return None
 
