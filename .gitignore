@@ -67,6 +67,7 @@ docs/specs/handoff-state.md
 handoff-progress.md
 
 # ---- Tooling de agentes (skills sincronizadas, no versionar) ----
+/.agents/
 /backend/.agents/
 /backend/.claude/
 /frontend/.agents/
