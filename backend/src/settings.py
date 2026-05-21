@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     make_webhook_url: str | None = None
 
     # --- Storage local ---
+    # ejemplos: corpus de smoke local (solo lectura en Docker si viene del git pull).
     base_docs_dir: Path = Path("./data/ejemplos")
+    # uploads: archivos subidos por el usuario (siempre escribible por el contenedor).
+    upload_dir: Path = Path("./data/uploads")
 
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000"]

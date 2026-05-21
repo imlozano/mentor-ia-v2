@@ -64,7 +64,7 @@ def test_secciones_cortas_se_fusionan():
 def test_fixture_ciberseguridad_genera_chunks_coherentes(tmp_path):
     """Verifica que el fixture real produce múltiples chunks, uno por sección."""
     import pathlib
-    fixture = pathlib.Path(__file__).parent.parent / "data" / "ejemplos" / "intro-ciberseguridad.md"
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "intro-ciberseguridad.md"
     if not fixture.exists():
         import pytest
         pytest.skip("fixture no disponible")

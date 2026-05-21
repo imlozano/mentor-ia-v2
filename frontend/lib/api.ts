@@ -48,8 +48,15 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const detail = body?.detail ?? body?.message;
+      const body = await res.json().catch(() => ({} as Record<string, unknown>));
+      const detail =
+        typeof body?.detail === "string"
+          ? body.detail
+          : typeof body?.message === "string"
+            ? body.message
+            : res.status >= 500
+              ? `Error del servidor (${res.status}). Inténtalo de nuevo.`
+              : undefined;
       if (res.status === 429) {
         throw new ApiError(
           429,

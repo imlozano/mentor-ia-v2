@@ -13,6 +13,7 @@ services:
       LOG_LEVEL: "INFO"
     volumes:
       - ./data/ejemplos:/app/data/ejemplos
+      - ./data/uploads:/app/data/uploads
       - ./credentials:/app/credentials:ro
     restart: unless-stopped
     healthcheck:
