@@ -39,6 +39,7 @@ export interface PlanRepasoResponse {
 export type TipoFuente = "pdf" | "txt" | "md" | "image";
 
 export interface DocumentoIndexado {
+  document_id: string;
   nombre_archivo: string;
   tipo_fuente: TipoFuente;
   total_chunks: number;
@@ -54,6 +55,7 @@ export interface UploadResponse {
   status: "ok";
   archivo: string;
   chunks_ingresados: number;
+  document_id?: string | null;
   aviso?: string | null;
 }
 
@@ -69,3 +71,5 @@ export interface HealthResponse {
   openai_ok: boolean;
 }
 
+
+export type QueryModo = "auto" | "documento" | "general";

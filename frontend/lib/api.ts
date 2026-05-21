@@ -1,9 +1,11 @@
+import { buildQueryBody } from "@/lib/build-query-body";
 import type {
   DocumentosResponse,
   HealthResponse,
   MensajeHistorial,
   OcrResponse,
   PlanRepasoResponse,
+  QueryModo,
   QueryResponse,
   UploadResponse,
 } from "@/lib/types";
@@ -57,6 +59,12 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
             : res.status >= 500
               ? `Error del servidor (${res.status}). Inténtalo de nuevo.`
               : undefined;
+      if (res.status === 404) {
+        throw new ApiError(404, detail ?? "No encontré ese documento en esta sesión.");
+      }
+      if (res.status === 422) {
+        throw new ApiError(422, detail ?? "El documento existe pero no tiene chunks indexados.");
+      }
       if (res.status === 429) {
         throw new ApiError(
           429,
@@ -87,11 +95,13 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
 export function askQuery(
   pregunta: string,
   historial: MensajeHistorial[] = [],
+  documentId?: string | null,
+  modo: QueryModo = "auto",
 ): Promise<QueryResponse> {
   return request<QueryResponse>("/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pregunta, historial }),
+    body: JSON.stringify(buildQueryBody(pregunta, historial, documentId, modo)),
   });
 }
 

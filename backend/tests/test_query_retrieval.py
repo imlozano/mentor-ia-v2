@@ -6,7 +6,6 @@ import pytest
 
 from src.utils.query_retrieval import build_retrieval_query, extract_filename
 
-
 # ---------------------------------------------------------------------------
 # extract_filename
 # ---------------------------------------------------------------------------

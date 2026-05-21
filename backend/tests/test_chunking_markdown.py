@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from src.utils.chunking import chunkear_markdown
 
-
 _SIMPLE_MD = """\
 # Sección uno
 

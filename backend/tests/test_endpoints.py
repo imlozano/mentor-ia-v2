@@ -22,7 +22,7 @@ class FakeAgenteRespuesta:
     def __init__(self) -> None:
         self.session_ids: list[str | None] = []
 
-    async def responder(self, pregunta, historial=None, top_k=5, umbral_score=0.55, session_id=None):
+    async def responder(self, pregunta, historial=None, top_k=5, umbral_score=0.55, session_id=None, document_id=None, modo="auto"):
         self.session_ids.append(session_id)
         return QueryResponse(
             respuesta="respuesta de prueba",
@@ -47,8 +47,15 @@ class FakeQdrant:
         for record in self._records:
             yield record
 
+    async def scroll_by_document(self, session_id, document_id, nombre_archivo=None, batch=256):
+        async for r in self._async_iter():
+            yield r
+
+    async def delete_by_document(self, session_id, document_id, nombre_archivo=None):
+        return None
+
     async def close(self) -> None:
-        # Lo invoca el teardown del lifespan al cerrar el TestClient.
+        # Lo invoca el teardown del lifespan al cerrar the TestClient.
         return None
 
 
@@ -126,25 +133,30 @@ def test_query_acepta_historial_opcional(client):
 
 
 def test_documentos_indexados_filtra_por_session_id(client):
+    sid = _uuid()
+    doc_id = "00000000-0000-4000-8000-000000000001"
     records = [
         SimpleNamespace(
             payload={
-                "source_path": "/data/a.pdf",
+                "source_path": "./data/uploads/a.pdf",
                 "nombre_archivo": "a.pdf",
                 "tipo_fuente": "pdf",
+                "document_id": doc_id,
+                "session_id": sid,
             }
         ),
         SimpleNamespace(
             payload={
-                "source_path": "/data/a.pdf",
+                "source_path": "./data/uploads/a.pdf",
                 "nombre_archivo": "a.pdf",
                 "tipo_fuente": "pdf",
+                "document_id": doc_id,
+                "session_id": sid,
             }
         ),
     ]
     fake = FakeQdrant(records)
     app.state.qdrant = fake
-    sid = _uuid()
 
     res = client.get("/documentos-indexados", headers={"X-Session-ID": sid})
 
@@ -155,6 +167,7 @@ def test_documentos_indexados_filtra_por_session_id(client):
     assert body["total_chunks"] == 2
     # source_path no debe filtrarse al cliente.
     assert "source_path" not in body["documentos"][0]
+    assert body["documentos"][0]["document_id"] == doc_id
 
 
 # ───────────────────────── Rate limiting ─────────────────────────

@@ -16,6 +16,7 @@ from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import Settings
 from src.utils.chunking import chunkear, chunkear_markdown
+from src.utils.document_id import compute_document_id, normalize_source_path
 from src.utils.pdf_reader import extraer_texto_pdf, extraer_texto_pdf_por_paginas
 from src.utils.upload_policy import IMAGE_EXTENSIONS, SUPPORTED_UPLOAD_EXTENSIONS
 
@@ -30,6 +31,7 @@ class IngestaResult:
 
     chunks_ingresados: int
     aviso: str | None = None
+    document_id: str | None = None
 
 
 def _cap_pdf_pages(total: int, limite: int) -> tuple[int, str | None]:
@@ -74,11 +76,22 @@ class AgenteExtraccion:
             return IngestaResult(chunks_ingresados=0, aviso=aviso)
 
         tipo = "image" if suffix in _IMAGE_SUFFIXES else suffix.lstrip(".")
-        source_path = str(path.as_posix())
+        source_path = normalize_source_path(str(path.as_posix()))
+        source_name = path.name
+        document_id = compute_document_id(session_id or "", source_name) if session_id else None
         chunks_ingresados = await self._embed_y_upsert(
-            chunks=chunks, source_path=source_path, tipo=tipo, session_id=session_id
+            chunks=chunks,
+            source_path=source_path,
+            tipo=tipo,
+            session_id=session_id,
+            document_id=document_id,
+            nombre_archivo=source_name,
         )
-        return IngestaResult(chunks_ingresados=chunks_ingresados, aviso=aviso)
+        return IngestaResult(
+            chunks_ingresados=chunks_ingresados,
+            aviso=aviso,
+            document_id=document_id,
+        )
 
     async def ingestar_carpeta(
         self, carpeta: Path, session_id: str | None = None
@@ -145,15 +158,18 @@ class AgenteExtraccion:
         source_path: str,
         tipo: str,
         session_id: str | None = None,
+        document_id: str | None = None,
+        nombre_archivo: str | None = None,
     ) -> int:
+        source_name = nombre_archivo or Path(source_path).name
+        if session_id and document_id:
+            await self._qdrant.delete_by_document(session_id, document_id, source_name)
+
         vectors = await self._openai.embed_texts(chunks)
         now = datetime.now(timezone.utc).isoformat()
-        source_name = Path(source_path).name
 
         points: list[qmodels.PointStruct] = []
         for idx, (chunk, vector) in enumerate(zip(chunks, vectors)):
-            # El point_id incluye session_id para que el mismo archivo subido
-            # en dos sesiones distintas no se sobrescriba entre sí.
             point_id = str(
                 uuid.uuid5(self._id_namespace, f"{session_id or ''}|{source_path}|{idx}")
             )
@@ -161,12 +177,13 @@ class AgenteExtraccion:
                 "texto": chunk,
                 "source_path": source_path,
                 "nombre_archivo": source_name,
+                "document_id": document_id,
                 "tipo_fuente": tipo,
                 "chunk_index": idx,
                 "session_id": session_id,
                 "embedding_model": self._settings.openai_embedding_model,
                 "embedding_dim": self._settings.embedding_dim,
-                "schema_version": "1.1",
+                "schema_version": "1.2",
                 "created_at": now,
             }
             points.append(qmodels.PointStruct(id=point_id, vector=vector, payload=payload))

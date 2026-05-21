@@ -10,7 +10,6 @@ from src.utils.plan_repaso_prompts import (
     parse_plan_response,
 )
 
-
 _SAMPLE_LLM_OUTPUT = """\
 [D+1]
 Elabora un mapa conceptual de algoritmos de ordenamiento con complejidad O(n).

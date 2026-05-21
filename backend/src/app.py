@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, Response
 from src.agentes.agente_extraccion import AgenteExtraccion
 from src.agentes.agente_plan_repaso import AgentePlanRepaso
 from src.agentes.agente_respuesta import AgenteRespuesta
+from src.exceptions import AppError
 from src.logger import setup_logging
 from src.models import (
     DocumentoIndexado,
@@ -31,6 +32,7 @@ from src.services.make_webhook import MakeWebhookService
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import get_settings
+from src.utils.document_id import derive_document_id
 from src.utils.safe_filename import safe_filename
 from src.utils.session_id import require_session_id
 from src.utils.upload_policy import IMAGE_EXTENSIONS, enforce_size, validate_upload
@@ -236,6 +238,7 @@ async def upload_document(
         status="ok",
         archivo=safe_name,
         chunks_ingresados=resultado.chunks_ingresados,
+        document_id=resultado.document_id,
         aviso=resultado.aviso,
     )
 
@@ -251,14 +254,18 @@ async def documentos_indexados(
 
     async for record in qdrant.scroll_all(session_id=session_id):
         payload = record.payload or {}
-        source_path = str(payload.get("source_path") or "")
-        if not source_path:
+        doc_id = derive_document_id(payload, session_id)
+        if not doc_id:
             continue
 
+        source_path = str(payload.get("source_path") or "")
         entry = grouped.setdefault(
-            source_path,
+            doc_id,
             {
-                "nombre_archivo": str(payload.get("nombre_archivo") or Path(source_path).name),
+                "document_id": doc_id,
+                "nombre_archivo": str(
+                    payload.get("nombre_archivo") or Path(source_path).name or "desconocido"
+                ),
                 "tipo_fuente": str(payload.get("tipo_fuente") or "txt"),
                 "total_chunks": 0,
             },
@@ -268,6 +275,7 @@ async def documentos_indexados(
 
     documentos = [
         DocumentoIndexado(
+            document_id=str(item["document_id"]),
             nombre_archivo=str(item["nombre_archivo"]),
             tipo_fuente=str(item["tipo_fuente"]),
             total_chunks=int(item["total_chunks"]),
@@ -298,7 +306,12 @@ async def query_endpoint(
             top_k=settings.rag_top_k,
             umbral_score=settings.rag_score_threshold,
             session_id=session_id,
+            document_id=body.document_id,
+            modo=body.modo,
         )
+    except AppError as exc:
+        logger.error("query app error: {}", exc.message)
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001

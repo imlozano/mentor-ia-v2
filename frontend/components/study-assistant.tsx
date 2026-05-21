@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, FileText, Sparkles, Trash2, Upload } from "lucide-react";
+import { AlertCircle, FileText, Sparkles, Trash2, Upload, X } from "lucide-react";
 
 import { askQuery, getIndexedDocuments, uploadDocument } from "@/lib/api";
 import type { DocumentoIndexado, Fuente, MensajeHistorial, Origen } from "@/lib/types";
@@ -32,6 +32,9 @@ export function StudyAssistant() {
   const [error, setError] = useState<string | null>(null);
   const [leftTab, setLeftTab] = useState<"contexto" | "documentos" | "ocr">(
     "contexto",
+  );
+  const [selectedDocument, setSelectedDocument] = useState<DocumentoIndexado | null>(
+    null,
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -68,7 +71,7 @@ export function StudyAssistant() {
     }));
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     try {
-      const res = await askQuery(text, historial);
+      const res = await askQuery(text, historial, selectedDocument?.document_id ?? null);
       setMessages((prev) => [
         ...prev,
         {
@@ -93,6 +96,20 @@ export function StudyAssistant() {
     try {
       const res = await uploadDocument(file);
       await refreshDocs();
+      if (res.document_id) {
+        setSelectedDocument({
+          document_id: res.document_id,
+          nombre_archivo: res.archivo,
+          tipo_fuente: file.name.endsWith(".pdf")
+            ? "pdf"
+            : file.name.endsWith(".md")
+              ? "md"
+              : file.name.match(/\.(png|jpg|jpeg)$/i)
+                ? "image"
+                : "txt",
+          total_chunks: res.chunks_ingresados,
+        });
+      }
       const aviso = res.aviso ? ` ${res.aviso}` : "";
       setMessages((prev) => [
         ...prev,
@@ -242,7 +259,15 @@ export function StudyAssistant() {
                         Documentos indexados
                       </h3>
                     </div>
-                    <DocumentsList docs={docs} />
+                    <DocumentsList
+                      docs={docs}
+                      selectedDocumentId={selectedDocument?.document_id}
+                      onSelect={(doc) =>
+                        setSelectedDocument((prev) =>
+                          prev?.document_id === doc.document_id ? null : doc,
+                        )
+                      }
+                    />
                   </div>
                 </ScrollArea>
               </TabsContent>
@@ -250,7 +275,17 @@ export function StudyAssistant() {
               <TabsContent value="ocr" className="m-0 h-full">
                 <ScrollArea className="h-full">
                   <div className="p-4">
-                    <OcrUploader />
+                    <OcrUploader
+                      onIndexed={async (docId, archivo, chunks) => {
+                        await refreshDocs();
+                        setSelectedDocument({
+                          document_id: docId,
+                          nombre_archivo: archivo,
+                          tipo_fuente: "txt",
+                          total_chunks: chunks,
+                        });
+                      }}
+                    />
                   </div>
                 </ScrollArea>
               </TabsContent>
@@ -278,6 +313,24 @@ export function StudyAssistant() {
               </button>
             ) : null}
           </div>
+
+          {selectedDocument ? (
+            <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-primary/5 px-5 py-2 text-xs">
+              <span>
+                Consultando:{" "}
+                <span className="font-medium">{selectedDocument.nombre_archivo}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedDocument(null)}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                aria-label="Quitar selección de documento"
+              >
+                <X className="h-3.5 w-3.5" />
+                Quitar
+              </button>
+            </div>
+          ) : null}
 
           <ScrollArea ref={scrollRef} className="flex-1">
             <div className="min-h-[400px] p-5">{messageView}</div>

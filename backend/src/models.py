@@ -14,6 +14,8 @@ class MensajeHistorial(BaseModel):
 class QueryRequest(BaseModel):
     pregunta: str = Field(..., min_length=1, max_length=5000)
     historial: list[MensajeHistorial] = Field(default_factory=list, max_length=12)
+    document_id: str | None = None
+    modo: Literal["auto", "documento", "general"] = "auto"
 
 
 class PlanRepasoRequest(BaseModel):
@@ -64,6 +66,7 @@ class OcrResponse(BaseModel):
 
 
 class DocumentoIndexado(BaseModel):
+    document_id: str
     nombre_archivo: str
     tipo_fuente: Literal["pdf", "txt", "md", "image"]
     total_chunks: int
@@ -79,4 +82,5 @@ class UploadResponse(BaseModel):
     status: Literal["ok"]
     archivo: str
     chunks_ingresados: int
+    document_id: str | None = None
     aviso: str | None = None

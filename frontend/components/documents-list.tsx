@@ -1,4 +1,4 @@
-import { FileText, Image as ImageIcon } from "lucide-react";
+import { CheckCircle2, FileText, Image as ImageIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { DocumentoIndexado } from "@/lib/types";
@@ -16,7 +16,13 @@ function iconFor(tipo: string) {
   return <FileText className="h-3.5 w-3.5 text-primary/70" />;
 }
 
-export function DocumentsList({ docs }: { docs: DocumentoIndexado[] }) {
+interface DocumentsListProps {
+  docs: DocumentoIndexado[];
+  selectedDocumentId?: string | null;
+  onSelect?: (doc: DocumentoIndexado) => void;
+}
+
+export function DocumentsList({ docs, selectedDocumentId, onSelect }: DocumentsListProps) {
   if (docs.length === 0) {
     return (
       <p className="px-1 text-xs text-muted-foreground">
@@ -40,30 +46,43 @@ export function DocumentsList({ docs }: { docs: DocumentoIndexado[] }) {
       </div>
 
       <div className="space-y-2">
-        {docs.map((doc) => (
-          <div
-            key={doc.nombre_archivo}
-            className="flex items-center justify-between gap-2 rounded-xl bg-muted/30 p-3 transition-colors hover:bg-muted/50"
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-              {iconFor(doc.tipo_fuente)}
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium [overflow-wrap:anywhere]">
-                  {doc.nombre_archivo}
-                </p>
-                <p className="text-[10px] text-muted-foreground">
-                  {doc.total_chunks} chunks
-                </p>
-              </div>
-            </div>
-            <Badge
-              variant="outline"
-              className={`shrink-0 rounded-md font-mono text-[10px] ${colorByType[doc.tipo_fuente] ?? ""}`}
+        {docs.map((doc) => {
+          const selected = selectedDocumentId === doc.document_id;
+          return (
+            <button
+              key={doc.document_id}
+              type="button"
+              onClick={() => onSelect?.(doc)}
+              className={`flex w-full items-center justify-between gap-2 rounded-xl p-3 text-left transition-colors ${
+                selected
+                  ? "bg-primary/10 ring-1 ring-primary/40"
+                  : "bg-muted/30 hover:bg-muted/50"
+              }`}
             >
-              {doc.tipo_fuente.toUpperCase()}
-            </Badge>
-          </div>
-        ))}
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                {selected ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+                ) : (
+                  iconFor(doc.tipo_fuente)
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium [overflow-wrap:anywhere]">
+                    {doc.nombre_archivo}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {doc.total_chunks} chunks
+                  </p>
+                </div>
+              </div>
+              <Badge
+                variant="outline"
+                className={`shrink-0 rounded-md font-mono text-[10px] ${colorByType[doc.tipo_fuente] ?? ""}`}
+              >
+                {doc.tipo_fuente.toUpperCase()}
+              </Badge>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

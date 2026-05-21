@@ -7,7 +7,11 @@ import { ocrImage, uploadDocument } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-export function OcrUploader() {
+interface OcrUploaderProps {
+  onIndexed?: (documentId: string, archivo: string, chunks: number) => void;
+}
+
+export function OcrUploader({ onIndexed }: OcrUploaderProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -55,6 +59,9 @@ export function OcrUploader() {
       setSuccess(
         `Indexado: ${res.archivo} (${res.chunks_ingresados} chunk${res.chunks_ingresados === 1 ? "" : "s"}).`,
       );
+      if (res.document_id) {
+        onIndexed?.(res.document_id, res.archivo, res.chunks_ingresados);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No fue posible indexar el texto.");
     } finally {
