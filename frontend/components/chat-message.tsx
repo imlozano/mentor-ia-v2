@@ -40,8 +40,8 @@ export function ChatMessageItem({ message }: { message: ChatMessage }) {
               {message.sources.map((s, idx) => (
                 <li key={`${s.archivo}-${s.chunk_index}-${idx}`} className="border-l-2 border-muted-foreground/20 pl-2">
                   <div className="font-semibold">
-                    {s.archivo} · chunk {s.chunk_index} · score{" "}
-                    {s.score.toFixed(3)}
+                    {s.archivo} · chunk {s.chunk_index}
+                    {s.score != null ? ` · score ${s.score.toFixed(3)}` : ""}
                   </div>
                   {s.excerpt && (
                     <div className="mt-1 font-normal text-muted-foreground leading-relaxed whitespace-pre-wrap">

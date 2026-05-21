@@ -8,7 +8,7 @@ export interface MensajeHistorial {
 export interface Fuente {
   archivo: string;
   chunk_index: number;
-  score: number;
+  score?: number | null;
   excerpt: string;
 }
 

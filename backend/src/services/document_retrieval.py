@@ -174,7 +174,7 @@ class DocumentRetrievalService:
                 chunk_index=all_chunks[i].chunk_index,
                 nombre_archivo=all_chunks[i].nombre_archivo,
                 document_id=document_id,
-                score=1.0,
+                score=None,
             )
             for i in indices
         ]

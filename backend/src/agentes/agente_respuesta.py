@@ -45,10 +45,8 @@ _SYSTEM_RAG_SUMMARY = (
 
 _SYSTEM_RAG_FALLBACK = (
     "Eres un asistente de aprendizaje. "
-    "No encontraste una coincidencia exacta en el documento para la pregunta, "
-    "pero debes responder con base en los fragmentos disponibles del documento. "
-    "Indica al inicio de forma breve que respondes con base en el contenido general "
-    "del documento. No sugieras subir el archivo. "
+    "Responde con base en los fragmentos del documento proporcionados. "
+    "No inventes contenido fuera del contexto. No sugieras subir el archivo. "
     "Cita las fuentes como [Fuente N]. Responde en español."
 )
 
@@ -225,10 +223,8 @@ class AgenteRespuesta:
         except (APITimeoutError, APIError) as exc:
             raise OpenAIServiceError() from exc
 
-        if use_fallback and not respuesta.lower().startswith("no encontr"):
-            respuesta = (
-                "No encontré una coincidencia exacta, pero con base en el documento: " + respuesta
-            )
+        if use_fallback:
+            respuesta = f"Con base en el documento seleccionado:\n\n{respuesta.strip()}"
 
         return QueryResponse(
             respuesta=respuesta,
@@ -339,7 +335,7 @@ class AgenteRespuesta:
         return Fuente(
             archivo=chunk.nombre_archivo,
             chunk_index=chunk.chunk_index,
-            score=float(chunk.score or 1.0),
+            score=chunk.score,
             excerpt=chunk.texto[:500],
         )
 

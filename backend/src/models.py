@@ -34,7 +34,7 @@ class HealthResponse(BaseModel):
 class Fuente(BaseModel):
     archivo: str
     chunk_index: int
-    score: float
+    score: float | None = None
     excerpt: str
 
 
