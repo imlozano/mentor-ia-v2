@@ -112,8 +112,13 @@ pnpm en el frontend (ver `spec-frontend.md` §3.1).
 ### 4.1 Requests
 
 ```python
+class MensajeHistorial(BaseModel):
+    role: Literal["user", "agent"]
+    content: str = Field(..., max_length=4000)
+
 class QueryRequest(BaseModel):
     pregunta: str = Field(..., min_length=1, max_length=5000)
+    historial: list[MensajeHistorial] = Field(default_factory=list, max_length=12)
 
 class PlanRepasoRequest(BaseModel):
     tema: str = Field(..., min_length=1, max_length=500)
@@ -272,21 +277,40 @@ Reglas:
 
 ```python
 class AgenteRespuesta:
-    def __init__(self, qdrant_client, openai_service): ...
+    def __init__(self, qdrant_client, openai_service, settings): ...
 
-    async def responder(self, pregunta: str, top_k: int = 5,
-                        umbral_score: float = 0.55) -> QueryResponse: ...
+    async def responder(
+        self,
+        pregunta: str,
+        historial: list[dict[str, str]] | None = None,
+        top_k: int = 5,
+        umbral_score: float = 0.55,
+        session_id: str | None = None,
+    ) -> QueryResponse: ...
 ```
 
 Reglas:
 
-- Embedding de la pregunta con `text-embedding-3-large`
+- **Retrieval query:** antes de embeder, la pregunta se transforma con
+  `utils/query_retrieval.py`:
+  - Ruido meta (`indexado correctamente`, `el documento habla de`…) se
+    elimina para que el vector apunte al contenido, no al chunk 0/intro.
+  - Si la pregunta es anafórica o demasiado corta (< 25 chars), se prefija
+    con el último mensaje `user` sustantivo del historial.
+  - Si se detecta un nombre de archivo en la pregunta, se pasa a Qdrant
+    como filtro adicional sobre `nombre_archivo` (con fallback sin filtro
+    si no hay hits).
+- Embedding de la pregunta transformada con `text-embedding-3-large`
   (`dimensions=768`, renormalizado a norma unitaria).
-- `query_points` sobre Qdrant con `limit=top_k`.
+- `query_points` sobre Qdrant con `limit=top_k` y filtro opcional de archivo.
 - Filtrar por umbral. Si quedan ≥1 fuentes: RAG. Si no: modelo solo.
-- Prompt RAG: incluye los chunks como contexto numerado y la pregunta
-  literal del usuario. Instruye al modelo a citar [Fuente N] en su
-  respuesta.
+- **Prompt RAG estricto (`system` fijo):** el modelo solo puede usar el
+  contexto proporcionado. Si se pregunta si A o B aparecen, debe indicar
+  explícitamente cuál sí y cuál no. Abstención "No consta en los documentos
+  indexados" si no hay datos suficientes.
+- **Historial en generación:** los últimos 6 mensajes del historial
+  (truncando contenido de agente a 500 chars) se incluyen en el prompt
+  como "Historial reciente" para mantener coherencia conversacional.
 
 ### 6.3 `AgentePlanRepaso`
 
@@ -307,8 +331,12 @@ Reglas:
 - Si `archivo` se pasa, primero llamar a
   `agente_extraccion.ingestar_documento(archivo)`.
 - Buscar contexto en Qdrant relevante al tema.
-- Generar las 4 sesiones con prompts diferenciados (D+1 enfatiza
-  repaso inicial, D+30 consolidación final).
+- Generar las 4 sesiones en **una llamada** a OpenAI con prompt unificado
+  (`utils/plan_repaso_prompts.py`): roles pedagógicos distintos por
+  D+1 (exposición), D+7 (práctica), D+14 (integración), D+30 (cierre).
+  Si el parseo falla, fallback por sesión con lista de actividades ya
+  asignadas para evitar repeticiones.
+- `OPENAI_MAX_TOKENS_PLAN` default **1400** (12 actividades detalladas).
 - Calcular fechas con `fecha_inicio + timedelta(days=N)`.
 - Si `email` está, POST a `MAKE_WEBHOOK_URL` con el plan.
 - `email_enviado` solo `True` si Make.com respondió 2xx.

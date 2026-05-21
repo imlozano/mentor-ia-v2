@@ -15,7 +15,7 @@ from qdrant_client.http import models as qmodels
 from src.services.openai_service import OpenAIService
 from src.services.qdrant_client import QdrantService
 from src.settings import Settings
-from src.utils.chunking import chunkear
+from src.utils.chunking import chunkear, chunkear_markdown
 from src.utils.pdf_reader import extraer_texto_pdf, extraer_texto_pdf_por_paginas
 from src.utils.upload_policy import IMAGE_EXTENSIONS, SUPPORTED_UPLOAD_EXTENSIONS
 
@@ -68,7 +68,7 @@ class AgenteExtraccion:
             raise ValueError(f"Extensión no soportada: {suffix}")
 
         texto, aviso = await self._extraer_texto(path)
-        chunks = self._chunkear(texto)
+        chunks = self._chunkear(texto, es_markdown=(suffix == ".md"))
         if not chunks:
             logger.warning("ingesta sin chunks: {}", path)
             return IngestaResult(chunks_ingresados=0, aviso=aviso)
@@ -130,8 +130,9 @@ class AgenteExtraccion:
             return texto, None
         raise ValueError(f"Extensión no soportada: {suffix}")
 
-    def _chunkear(self, texto: str) -> list[str]:
-        return chunkear(
+    def _chunkear(self, texto: str, es_markdown: bool = False) -> list[str]:
+        fn = chunkear_markdown if es_markdown else chunkear
+        return fn(
             texto=texto,
             max_chars=self._settings.chunk_max_chars,
             overlap=self._settings.chunk_overlap,

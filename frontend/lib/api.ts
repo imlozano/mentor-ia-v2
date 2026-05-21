@@ -1,6 +1,7 @@
 import type {
   DocumentosResponse,
   HealthResponse,
+  MensajeHistorial,
   OcrResponse,
   PlanRepasoResponse,
   QueryResponse,
@@ -76,11 +77,14 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
   }
 }
 
-export function askQuery(pregunta: string): Promise<QueryResponse> {
+export function askQuery(
+  pregunta: string,
+  historial: MensajeHistorial[] = [],
+): Promise<QueryResponse> {
   return request<QueryResponse>("/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pregunta }),
+    body: JSON.stringify({ pregunta, historial }),
   });
 }
 

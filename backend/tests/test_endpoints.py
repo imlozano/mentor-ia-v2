@@ -22,7 +22,7 @@ class FakeAgenteRespuesta:
     def __init__(self) -> None:
         self.session_ids: list[str | None] = []
 
-    async def responder(self, pregunta, top_k, umbral_score, session_id=None):
+    async def responder(self, pregunta, historial=None, top_k=5, umbral_score=0.55, session_id=None):
         self.session_ids.append(session_id)
         return QueryResponse(
             respuesta="respuesta de prueba",
@@ -99,6 +99,30 @@ def test_query_pasa_session_id_al_agente(client):
 
     assert res.status_code == 200
     assert fake.session_ids == [sid]
+
+
+def test_query_acepta_historial_opcional(client):
+    """Retrocompat: body sin historial sigue en 200; con historial también."""
+    fake = FakeAgenteRespuesta()
+    app.state.agente_respuesta = fake
+    sid = _uuid()
+    headers = {"X-Session-ID": sid}
+
+    res_sin = client.post("/query", json={"pregunta": "hola"}, headers=headers)
+    assert res_sin.status_code == 200
+
+    res_con = client.post(
+        "/query",
+        json={
+            "pregunta": "¿y eso?",
+            "historial": [
+                {"role": "user", "content": "¿Cómo protegerme en redes públicas?"},
+                {"role": "agent", "content": "Usa VPN y 2FA."},
+            ],
+        },
+        headers=headers,
+    )
+    assert res_con.status_code == 200
 
 
 def test_documentos_indexados_filtra_por_session_id(client):

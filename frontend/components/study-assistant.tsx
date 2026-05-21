@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, FileText, Sparkles, Trash2, Upload } from "lucide-react";
 
 import { askQuery, getIndexedDocuments, uploadDocument } from "@/lib/api";
-import type { DocumentoIndexado, Fuente, Origen } from "@/lib/types";
+import type { DocumentoIndexado, Fuente, MensajeHistorial, Origen } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -61,9 +61,14 @@ export function StudyAssistant() {
   async function sendQuestion(text: string) {
     setError(null);
     setLoading(true);
+    // Capturar historial ANTES de añadir el mensaje actual (máximo 6 mensajes)
+    const historial: MensajeHistorial[] = messages.slice(-6).map((m) => ({
+      role: m.role as "user" | "agent",
+      content: m.role === "agent" ? m.content.slice(0, 1000) : m.content,
+    }));
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     try {
-      const res = await askQuery(text);
+      const res = await askQuery(text, historial);
       setMessages((prev) => [
         ...prev,
         {

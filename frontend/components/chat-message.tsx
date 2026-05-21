@@ -36,11 +36,18 @@ export function ChatMessageItem({ message }: { message: ChatMessage }) {
             <summary className="cursor-pointer hover:text-foreground">
               Ver fuentes
             </summary>
-            <ul className="mt-2 space-y-1 font-mono text-[11px]">
+            <ul className="mt-2 space-y-2 font-mono text-[11px]">
               {message.sources.map((s, idx) => (
-                <li key={`${s.archivo}-${s.chunk_index}-${idx}`}>
-                  {s.archivo} · chunk {s.chunk_index} · score{" "}
-                  {s.score.toFixed(3)}
+                <li key={`${s.archivo}-${s.chunk_index}-${idx}`} className="border-l-2 border-muted-foreground/20 pl-2">
+                  <div className="font-semibold">
+                    {s.archivo} · chunk {s.chunk_index} · score{" "}
+                    {s.score.toFixed(3)}
+                  </div>
+                  {s.excerpt && (
+                    <div className="mt-1 font-normal text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                      {s.excerpt}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
