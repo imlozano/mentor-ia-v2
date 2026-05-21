@@ -40,6 +40,31 @@ VERSION = "0.1.0"
 settings = get_settings()
 
 
+def _write_upload_file(safe_name: str, content: bytes) -> Path:
+    """Guarda un archivo subido en ``upload_dir`` (escribible por el usuario app)."""
+    upload_dir = settings.upload_dir
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target_path = upload_dir / safe_name
+    try:
+        target_path.write_bytes(content)
+    except PermissionError as exc:
+        logger.error("upload: sin permiso de escritura en {!r}: {!r}", target_path, exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo guardar el archivo en el servidor. "
+                "Vuelve a intentarlo; si persiste, contacta al administrador."
+            ),
+        ) from exc
+    except OSError as exc:
+        logger.error("upload: error de E/S en {!r}: {!r}", target_path, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo guardar el archivo en el servidor.",
+        ) from exc
+    return target_path
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -202,10 +227,7 @@ async def upload_document(
     # Verificación de tamaño real (cubre clientes que no envían tamaño).
     enforce_size(suffix, content, settings)
 
-    docs_dir = settings.base_docs_dir
-    docs_dir.mkdir(parents=True, exist_ok=True)
-    target_path = docs_dir / safe_name
-    target_path.write_bytes(content)
+    target_path = _write_upload_file(safe_name, content)
 
     agente_extraccion: AgenteExtraccion = request.app.state.agente_extraccion
     resultado = await agente_extraccion.ingestar_documento(target_path, session_id)
@@ -331,10 +353,7 @@ async def plan_repaso_endpoint(
             safe_name = validate_upload(file.filename or "documento_plan.pdf", file.size, settings)
             content = await file.read()
             enforce_size(Path(safe_name).suffix.lower(), content, settings)
-            docs_dir = settings.base_docs_dir
-            docs_dir.mkdir(parents=True, exist_ok=True)
-            archivo_guardado = docs_dir / safe_name
-            archivo_guardado.write_bytes(content)
+            archivo_guardado = _write_upload_file(safe_name, content)
 
     try:
         return await agente_plan.generar_plan(

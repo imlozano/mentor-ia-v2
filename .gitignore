@@ -46,7 +46,8 @@ Thumbs.db
 # ---- Datos locales ----
 backend/data/ejemplos/*
 !backend/data/ejemplos/.gitkeep
-!backend/data/ejemplos/intro-ciberseguridad.md
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
 backend/data/test/
 
 # ---- Logs ----
