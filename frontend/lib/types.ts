@@ -1,5 +1,10 @@
 export type Origen = "rag" | "modelo";
 
+export interface MensajeHistorial {
+  role: "user" | "agent";
+  content: string;
+}
+
 export interface Fuente {
   archivo: string;
   chunk_index: number;

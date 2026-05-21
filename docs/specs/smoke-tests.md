@@ -142,6 +142,34 @@ Tres puntos a destacar cuando se demuestre el sistema:
    `gpt-4o-mini` + red + nginx + Qdrant Cloud. Cualquier valor por
    encima de 10 s indica problema en alguna dependencia.
 
+## 4. Smoke de seguimiento conversacional — post 2026-05-20
+
+Validaciones añadidas tras detectar fallos en preguntas de seguimiento
+(contexto: documento `intro-ciberseguridad.md` subido en la sesión).
+
+**Corpus:** `backend/data/ejemplos/intro-ciberseguridad.md` (fixture nuevo,
+5 secciones, solo menciona ProtonVPN — NordVPN no aparece).
+
+### 4.1 Queries de seguimiento sobre VPN
+
+| # | Pregunta | Origen esperado | Detalle esperado |
+| - | -------- | --------------- | ---------------- |
+| 1 | "Como puedo protegerme de la ciberseguridad" | `rag` | chunk sección VPN/2FA con score > 0.55 |
+| 2 | "Que puedo usar para protegerme, el documento habla de ProtonVPN o de NordVPN?" | `rag` | respuesta menciona **solo ProtonVPN**; NordVPN se dice que no aparece |
+| 3 | "El documento qué dice?" (con historial de pregunta 1) | `rag` | anáfora resuelta; responde con contexto de seguridad |
+| 4 | "Necesito verificar si en el documento habla de usar ProtonVPN o NordVPN" | `rag` | misma respuesta que Q2 |
+| 5 | "El documento que dice?" (sin historial) | `modelo` o abstención | no pide pegar el texto; orienta a hacer pregunta concreta |
+
+### 4.2 Cambios que explican la mejora
+
+- `utils/query_retrieval.py`: normaliza ruido meta y resuelve anáforas con historial.
+- `qdrant_client.py`: filtro `nombre_archivo` cuando la pregunta menciona un archivo.
+- `agente_respuesta.py`: prompt `system` estricto — respuesta solo desde contexto;
+  historial (últimos 6 mensajes) incluido en el prompt.
+- `utils/chunking.py`: `chunkear_markdown` divide por encabezados H1-H3, evitando
+  que el chunk 0 (intro/resumen del doc) gane todas las queries de seguimiento.
+- Frontend: `askQuery` envía `historial`; "Ver fuentes" muestra excerpt completo.
+
 ## 5. Para defender en sustentación
 
 - El sistema **nunca cita fuentes que no superen el umbral 0.55** de

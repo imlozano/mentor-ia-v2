@@ -84,6 +84,31 @@ class QdrantService:
             ]
         )
 
+    @staticmethod
+    def _combined_filter(
+        session_id: str | None,
+        nombre_archivo: str | None,
+    ) -> qmodels.Filter | None:
+        """Construye un filtro combinado por session_id y/o nombre_archivo."""
+        conditions: list[qmodels.FieldCondition] = []
+        if session_id:
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="session_id",
+                    match=qmodels.MatchValue(value=session_id),
+                )
+            )
+        if nombre_archivo:
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="nombre_archivo",
+                    match=qmodels.MatchValue(value=nombre_archivo),
+                )
+            )
+        if not conditions:
+            return None
+        return qmodels.Filter(must=conditions)
+
     async def ping(self, timeout: float = 2.0) -> bool:
         """Verifica conectividad con get_collections. Devuelve True/False."""
         try:
@@ -104,15 +129,35 @@ class QdrantService:
         limit: int,
         score_threshold: float | None = None,
         session_id: str | None = None,
+        nombre_archivo: str | None = None,
     ) -> list[qmodels.ScoredPoint]:
+        """Busca los puntos más similares al vector dado.
+
+        Si se especifica ``nombre_archivo``, la búsqueda queda acotada a los
+        chunks de ese archivo dentro de la sesión.  Cuando el filtro combinado
+        no devuelve resultados, se reintenta sin el filtro de archivo para
+        garantizar que siempre haya una respuesta (fallback gracioso).
+        """
+        query_filter = self._combined_filter(session_id, nombre_archivo)
         result = await self._client.query_points(
             collection_name=self.collection,
             query=vector,
             limit=limit,
             score_threshold=score_threshold,
-            query_filter=self._session_filter(session_id),
+            query_filter=query_filter,
             with_payload=True,
         )
+        # Fallback: si el filtro de archivo no produjo hits, repetir sin él
+        if not result.points and nombre_archivo:
+            fallback_filter = self._session_filter(session_id)
+            result = await self._client.query_points(
+                collection_name=self.collection,
+                query=vector,
+                limit=limit,
+                score_threshold=score_threshold,
+                query_filter=fallback_filter,
+                with_payload=True,
+            )
         return result.points
 
     async def scroll_all(

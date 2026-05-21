@@ -272,6 +272,7 @@ async def query_endpoint(
     try:
         return await agente_respuesta.responder(
             pregunta=body.pregunta,
+            historial=[m.model_dump() for m in body.historial],
             top_k=settings.rag_top_k,
             umbral_score=settings.rag_score_threshold,
             session_id=session_id,

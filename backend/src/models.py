@@ -6,8 +6,14 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr, Field
 
 
+class MensajeHistorial(BaseModel):
+    role: Literal["user", "agent"]
+    content: str = Field(..., max_length=4000)
+
+
 class QueryRequest(BaseModel):
     pregunta: str = Field(..., min_length=1, max_length=5000)
+    historial: list[MensajeHistorial] = Field(default_factory=list, max_length=12)
 
 
 class PlanRepasoRequest(BaseModel):

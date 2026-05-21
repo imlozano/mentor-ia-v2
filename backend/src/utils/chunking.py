@@ -1,14 +1,22 @@
 """Chunking de texto para indexación.
 
-Trocea un texto en bloques de hasta `max_chars` caracteres con `overlap`
-caracteres de solape entre bloques consecutivos, hasta un tope de
-`max_chunks` chunks por documento.
+Expone dos estrategias:
+
+- ``chunkear``: trocea por caracteres con solape, para PDF/TXT/imágenes.
+- ``chunkear_markdown``: respeta los encabezados Markdown (H1-H3) como
+  fronteras naturales, luego aplica ``chunkear`` si una sección es demasiado
+  grande. Produce chunks semánticamente más coherentes para documentos .md.
 
 Los parámetros por defecto (900 / 150 / 100) son los del proyecto y están
 justificados en docs/academic/Modelo_Datos_Qdrant.md §3.
 """
 
 from __future__ import annotations
+
+import re
+
+_HEADING_RE = re.compile(r"^#{1,3}\s", re.MULTILINE)
+_MIN_SECTION_CHARS = 80  # Secciones más cortas se fusionan con la siguiente
 
 
 def chunkear(
@@ -42,6 +50,69 @@ def chunkear(
         pos += stride
 
     return chunks
+
+
+def chunkear_markdown(
+    texto: str,
+    max_chars: int = 900,
+    overlap: int = 150,
+    max_chunks: int = 100,
+) -> list[str]:
+    """Chunking que respeta fronteras de encabezados Markdown.
+
+    Divide el texto por encabezados H1-H3 para que cada chunk corresponda
+    a una sección coherente.  Si una sección excede ``max_chars``, se
+    subdivide con ``chunkear``.  Secciones muy cortas (< ``_MIN_SECTION_CHARS``)
+    se fusionan con la siguiente para evitar micro-chunks.
+
+    El total de chunks producidos no supera ``max_chunks``.
+    """
+    if not texto or not texto.strip():
+        return []
+
+    # Dividir por encabezados preservando el encabezado con su sección
+    parts = _HEADING_RE.split(texto)
+    headers = _HEADING_RE.findall(texto)
+
+    # Reconstruir secciones: primer parte puede ser preámbulo sin encabezado
+    sections: list[str] = []
+    if parts[0].strip():
+        sections.append(parts[0].strip())
+    for header, body in zip(headers, parts[1:]):
+        sections.append((header + body).strip())
+
+    # Fusionar secciones muy cortas con la siguiente
+    merged: list[str] = []
+    buffer = ""
+    for sec in sections:
+        if buffer:
+            buffer = buffer + "\n\n" + sec
+            if len(buffer) >= _MIN_SECTION_CHARS:
+                merged.append(buffer)
+                buffer = ""
+        elif len(sec) < _MIN_SECTION_CHARS:
+            buffer = sec
+        else:
+            merged.append(sec)
+    if buffer:
+        if merged:
+            merged[-1] = merged[-1] + "\n\n" + buffer
+        else:
+            merged.append(buffer)
+
+    # Subdividir secciones grandes y aplanar a lista final
+    chunks: list[str] = []
+    for sec in merged:
+        if len(chunks) >= max_chunks:
+            break
+        remaining = max_chunks - len(chunks)
+        if len(sec) <= max_chars:
+            chunks.append(sec)
+        else:
+            sub = chunkear(sec, max_chars=max_chars, overlap=overlap, max_chunks=remaining)
+            chunks.extend(sub)
+
+    return chunks[:max_chunks]
 
 
 if __name__ == "__main__":

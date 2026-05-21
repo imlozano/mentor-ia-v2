@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # --- max_tokens OpenAI (acota coste por respuesta) ---
     openai_max_tokens_chat: int = 800
     openai_max_tokens_ocr: int = 2000
-    openai_max_tokens_plan: int = 400
+    openai_max_tokens_plan: int = 1400
 
     model_config = SettingsConfigDict(
         env_file=".env",
