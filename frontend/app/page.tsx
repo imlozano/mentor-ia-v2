@@ -1,7 +1,6 @@
 "use client";
 
-import { Brain } from "lucide-react";
-
+import { AppLogo } from "@/components/app-logo";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StudyAssistant } from "@/components/study-assistant";
 import { ReviewPlan } from "@/components/review-plan";
@@ -13,9 +12,7 @@ export default function Home() {
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-              <Brain className="h-4 w-4 text-primary" />
-            </div>
+            <AppLogo className="h-8 w-8" priority />
             <div className="flex flex-col">
               <h1 className="text-base font-semibold leading-none tracking-tight text-foreground">
                 Mentor IA
