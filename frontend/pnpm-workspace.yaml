@@ -4,6 +4,13 @@ minimumReleaseAgeExclude:
 blockExoticSubdeps: true
 overrides:
   postcss@<8.5.10: ">=8.5.10"
+  # Parches de seguridad para dependencias transitivas (Dependabot, jun 2026).
+  # Todos publicados >24 h, así que respetan minimumReleaseAge: 1440. Se acotan
+  # al mismo major para no introducir saltos mayores no justificados por un parche.
+  vite@<7.3.5: ">=7.3.5 <8"
+  esbuild@<0.28.1: ">=0.28.1 <0.29"
+  js-yaml@<4.2.0: ">=4.2.0 <5"
+  "@babel/core@<7.29.6": ">=7.29.6 <8"
 ignoredBuiltDependencies:
   - msw
   - sharp
